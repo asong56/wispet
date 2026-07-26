@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9999]+.[0-9999]+.[0-9999]+'
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
