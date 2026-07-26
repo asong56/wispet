@@ -1,0 +1,55 @@
+# Wispet configuration
+# Generated on first launch. Edit by hand or via Settings (⌘,).
+#
+# hotkey syntax: Modifier+Key  e.g. "Alt+D", "Ctrl+Shift+W"
+# theme:         "light" | "dark" | "auto"
+
+[general]
+hotkey_main      = "Alt+W"   # Show / hide the main window
+hotkey           = "Alt+D"   # Translate current clipboard selection
+theme            = "auto"
+popup_dismiss_ms = 4000      # Auto-dismiss popup after N ms (0 = never)
+
+[providers]
+
+# ── Local MDX dictionaries ───────────────────────────────────────────────────
+# Uncomment and set 'path' to enable.  Add more [[providers.list]] blocks
+# for additional dictionaries — they appear in the order listed.
+
+# [[providers.list]]
+# type     = "mdx"
+# enabled  = true
+# priority = 1
+# label    = "Oxford Advanced"
+# path     = "/Users/you/Dictionaries/OALD10.mdx"
+
+# ── DeepL ────────────────────────────────────────────────────────────────────
+# Free tier keys end in ":fx".  Sign up at https://www.deepl.com/pro-api
+
+[[providers.list]]
+type        = "deepl"
+enabled     = false
+priority    = 2
+label       = "DeepL"
+api_key     = ""          # Paste your API key here
+source_lang = "auto"
+target_lang = "ZH"
+
+# ── Google Translate ──────────────────────────────────────────────────────────
+
+[[providers.list]]
+type        = "google"
+enabled     = true
+priority    = 3
+label       = "Google Translate"
+source_lang = "auto"
+target_lang = "zh-CN"
+
+# ── Wikipedia ─────────────────────────────────────────────────────────────────
+
+[[providers.list]]
+type    = "wikipedia"
+enabled = true
+priority = 4
+label   = "Wikipedia"
+lang    = "en"

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Wispet</title>
+  <link rel="stylesheet" href="css/acdn.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+<div id="popup-app">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header data-tauri-drag-region>
+    <span id="popup-query-word" class="query-word"></span>
+
+    <button
+      id="popup-close-btn"
+      class="icon-btn"
+      aria-label="Close"
+      style="width:24px;height:24px;"
+    >
+      <svg viewBox="0 0 256 256" aria-hidden="true">
+        <path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- ── Results ────────────────────────────────────────────────────────── -->
+  <main id="popup-results" role="region" aria-label="Translation results">
+  </main>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+  <footer id="popup-open-main">
+    <span style="font-size:var(--text-xs);color:var(--color-text-muted)">
+      <kbd class="hint-key">Esc</kbd> to dismiss
+    </span>
+    <button id="popup-open-main-btn" data-variant="ghost">
+      Open in Wispet →
+    </button>
+  </footer>
+
+</div><!-- /#popup-app -->
+
+<script type="module" src="js/popup.js"></script>
+</body>
+</html>
