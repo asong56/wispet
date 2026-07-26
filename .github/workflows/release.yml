@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9999]+.[0-9999]+.[0-9999]+'
 
 permissions:
   contents: write
@@ -19,7 +19,7 @@ jobs:
           - os: ubuntu-22.04
             artifact_name: wispet
             asset_name: wispet-linux-amd64
-          - os: macos-latest      # macOS 15 arm64 since August 2025
+          - os: macos-latest
             artifact_name: wispet
             asset_name: wispet-macos-arm64
           - os: windows-latest
@@ -38,7 +38,6 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # ── Linux system dependencies (WebKit2GTK + tauri deps) ───────────────────
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -60,7 +59,6 @@ jobs:
         env:
           RUSTFLAGS: "-D warnings"
 
-      # ── Locate the produced binary ────────────────────────────────────────────
       - name: Stage binary (Unix)
         if: runner.os != 'Windows'
         run: |
