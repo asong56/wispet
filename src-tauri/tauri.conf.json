@@ -12,7 +12,7 @@
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost https://asset.localhost data: wispet:; media-src 'self' wispet:"
     },
     "windows": [
       {
@@ -37,7 +37,7 @@
     "trayIcon": {
       "iconPath": "icons/tray.png",
       "iconAsTemplate": true,
-      "menuOnLeftClick": false
+      "showMenuOnLeftClick": false
     }
   },
   "bundle": {

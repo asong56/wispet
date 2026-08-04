@@ -1,15 +1,9 @@
 //! Cross-platform clipboard change watcher.
 //!
-//! Strategy:
-//!   - macOS: poll `NSPasteboard.changeCount` every 150ms
-//!   - Windows: poll via `GetClipboardSequenceNumber` every 150ms
-//!   - Linux/X11: poll `arboard` clipboard every 150ms
-//!   - Linux/Wayland: same poll (arboard handles both via x11/wayland backends)
-//!
-//! We emit a Tauri event "clipboard-changed" with the new text payload
-//! whenever the clipboard text changes to a non-empty value.
-//! The popup is NOT triggered automatically — the user must press the
-//! selection hotkey, at which point the frontend reads the latest clipboard.
+//! Polls clipboard text via `arboard` every 150ms on all platforms and emits
+//! a "clipboard-changed" event when it changes to a non-empty value. The
+//! popup is not triggered automatically — the user presses the selection
+//! hotkey, at which point the frontend reads the latest clipboard.
 
 use tauri::{AppHandle, Emitter};
 
@@ -38,7 +32,6 @@ pub fn start(app: AppHandle) {
 
 /// Read current clipboard text, returning None on error.
 fn read_clipboard_text() -> Option<String> {
-    // arboard works on all three platforms
     let mut ctx = arboard::Clipboard::new().ok()?;
     ctx.get_text().ok()
 }

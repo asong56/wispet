@@ -35,7 +35,6 @@ pub async fn save_config(
 ) -> Result<(), String> {
     config::save(&new_cfg).map_err(|e| e.to_string())?;
 
-    // Rebuild provider list from new config
     let new_providers = crate::build_providers(&new_cfg);
     {
         let mut providers = state.providers.lock().await;
@@ -46,7 +45,6 @@ pub async fn save_config(
     // reading from state during registration sees the new values.
     *state.config.lock().await = new_cfg.clone();
 
-    // Re-register global shortcuts
     crate::register_shortcuts(&app, &new_cfg)
         .map_err(|e| e.to_string())?;
 
@@ -85,7 +83,6 @@ pub fn show_popup(app: AppHandle, x: i32, y: i32, query: String) {
     use tauri::PhysicalPosition;
 
     if let Some(win) = app.get_webview_window("popup") {
-        // Navigate to the popup with the query embedded
         let _ = win.eval(&format!(
             "window.__wispet_query__ = {}; if (window.onWispetQuery) onWispetQuery(window.__wispet_query__);",
             serde_json::to_string(&query).unwrap_or_default()

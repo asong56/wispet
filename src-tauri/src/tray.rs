@@ -38,7 +38,6 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
                     let _ = win.set_focus();
-                    // Signal the frontend to open settings view
                     let _ = win.eval("window.__wispet_nav__ = 'settings'; if (window.onWispetNav) onWispetNav('settings');");
                 }
             }

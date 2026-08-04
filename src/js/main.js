@@ -6,9 +6,12 @@
  * Keyboard:      Esc (clear/hide), Cmd+, (settings)
  */
 
-import { lookup, getConfig, saveConfig, getConfigPath, onClipboardChange } from './ipc.js';
+import { lookup, getConfig, saveConfig, getConfigPath, onClipboardChange, onOpenQuery } from './ipc.js';
 import { renderResult, renderLoading } from './render.js';
 import { initSettings } from './settings.js';
+
+// Tauri v2 renamed window.getCurrent() -> getCurrentWindow()
+const { getCurrentWindow } = window.__TAURI__.window;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -33,28 +36,31 @@ async function init() {
   applyTheme(config.general.theme);
 
   await initSettings(config, onConfigSaved);
-
-  // Focus search immediately
   searchInput.focus();
 
-  // Listen for clipboard changes — just track latest; no auto-popup
-  onClipboardChange(_text => {
-    // Could prefill on future keypress — for now just a no-op hook
+  // Just track latest clipboard text; the popup is triggered by hotkey, not auto-shown
+  onClipboardChange(_text => {});
+
+  // Popup's "Open in Wispet" button broadcasts the query via this event
+  onOpenQuery(query => {
+    showResultsView();
+    searchInput.value = query;
+    searchInput.focus();
+    clearBtn && (clearBtn.style.display = query ? 'flex' : 'none');
+    doLookup(query.trim());
   });
 
-  // Wire events
   searchInput.addEventListener('input', onSearchInput);
   searchInput.addEventListener('keydown', onSearchKeydown);
   btnSettings.addEventListener('click', toggleSettings);
-  btnClose.addEventListener('click', () => window.__TAURI__.window.getCurrent().hide());
+  btnClose.addEventListener('click', () => getCurrentWindow().hide());
   clearBtn?.addEventListener('click', clearSearch);
 
-  // Tray/shortcut can signal navigation
+  // Set by tray.rs / commands.rs via win.eval() to trigger navigation
   window.onWispetNav = (view) => {
     if (view === 'settings') showSettings();
   };
 
-  // Global keyboard
   document.addEventListener('keydown', onGlobalKeydown);
 }
 
@@ -78,7 +84,7 @@ function onSearchKeydown(e) {
     if (searchInput.value) {
       clearSearch();
     } else {
-      window.__TAURI__.window.getCurrent().hide();
+      getCurrentWindow().hide();
     }
   }
   // Cmd/Ctrl+, → settings
@@ -204,7 +210,6 @@ function showSettings() {
 
 async function onConfigSaved(newConfig) {
   applyTheme(newConfig.general.theme);
-  // Return to search after save
   showResultsView();
   searchInput.focus();
 }

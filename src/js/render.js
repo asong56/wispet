@@ -37,11 +37,8 @@ const ALLOWED_ATTRS = new Set(['href','src','alt','title','lang','class','colspa
  */
 export function sanitizeHtml(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-
-  // Remove script, style, link, meta, object, iframe
   doc.querySelectorAll('script,style,link,meta,object,iframe,noscript').forEach(el => el.remove());
 
-  // Walk all elements and strip disallowed tags/attributes
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
   const toRemove = [];
 
@@ -49,15 +46,13 @@ export function sanitizeHtml(html) {
   while (node) {
     const tag = node.tagName.toLowerCase();
     if (!ALLOWED_TAGS.has(tag)) {
-      // Unwrap: keep children, remove element
+      // Unwrap: keep children, remove the disallowed element itself
       toRemove.push(node);
     } else {
-      // Strip disallowed attributes
       for (const attr of [...node.attributes]) {
         if (!ALLOWED_ATTRS.has(attr.name.toLowerCase())) {
           node.removeAttribute(attr.name);
         }
-        // Block javascript: hrefs
         if (attr.name === 'href' && attr.value.startsWith('javascript:')) {
           node.removeAttribute('href');
         }
@@ -66,8 +61,8 @@ export function sanitizeHtml(html) {
     node = walker.nextNode();
   }
 
-  // Iterate in reverse (bottom-up) so that child disallowed nodes are unwrapped
-  // before their parent, preventing replaceWith from leaving orphaned subtrees.
+  // Reverse (bottom-up) order so child disallowed nodes are unwrapped before
+  // their parent — otherwise replaceWith can leave orphaned subtrees.
   for (let i = toRemove.length - 1; i >= 0; i--) {
     const el = toRemove[i];
     el.replaceWith(...el.childNodes);
@@ -88,7 +83,6 @@ export function renderResult(result) {
   section.className = 'result';
   section.dataset.providerId = result.provider_id;
 
-  // Provider header
   const header = document.createElement('div');
   header.className = 'provider-header';
 
@@ -116,7 +110,6 @@ export function renderResult(result) {
     header.appendChild(lang);
   }
 
-  // Copy button
   const copyBtn = document.createElement('button');
   copyBtn.className = 'copy-btn icon-btn';
   copyBtn.setAttribute('aria-label', 'Copy');
@@ -126,21 +119,52 @@ export function renderResult(result) {
 
   section.appendChild(header);
 
-  // Content area
   const content = document.createElement('div');
   if (result.kind === 'dict') {
     content.className = 'dict-content';
     content.innerHTML = sanitizeHtml(result.content);
+    attachAudioLinks(content);
   } else if (result.kind === 'translation') {
     content.className = 'translation-content';
     content.textContent = result.content;
   } else {
     content.className = 'article-content';
     content.innerHTML = sanitizeHtml(result.content);
+    attachAudioLinks(content);
   }
   section.appendChild(content);
 
   return section;
+}
+
+// ── Pronunciation audio (wispet://mdd/sound/... links) ─────────────────────────
+//
+// MDX entries embed pronunciation as an `<a href="sound://word.mp3">` link
+// (rewritten server-side to `wispet://mdd/sound/word.mp3` — see
+// sanitize_mdx_html in provider/mdx.rs). Left alone, clicking it would
+// navigate the whole window to that URL; intercept the click and play it
+// through a shared <audio> element instead.
+
+let sharedAudio = null;
+
+/**
+ * Delegate clicks on `wispet://mdd/sound/...` links within `container` to
+ * audio playback instead of navigation.
+ * @param {HTMLElement} container
+ */
+function attachAudioLinks(container) {
+  container.addEventListener('click', (e) => {
+    const link = e.target.closest('a[href^="wispet://mdd/sound/"]');
+    if (!link) return;
+    e.preventDefault();
+    if (!sharedAudio) {
+      sharedAudio = new Audio();
+    }
+    sharedAudio.src = link.getAttribute('href');
+    sharedAudio.play().catch(() => {
+      // Autoplay/decoding errors are non-fatal — pronunciation is a nice-to-have.
+    });
+  });
 }
 
 /**
@@ -176,7 +200,6 @@ export function renderLoading(label) {
  * @param {HTMLElement} btn
  */
 async function copyContent(content, btn) {
-  // Strip tags for dict/article
   const tmp = document.createElement('div');
   tmp.innerHTML = content;
   const text = tmp.textContent || tmp.innerText || content;
@@ -186,7 +209,7 @@ async function copyContent(content, btn) {
     btn.style.color = 'var(--color-accent)';
     setTimeout(() => { btn.style.color = ''; }, 1200);
   } catch {
-    // fallback: execCommand
+    // navigator.clipboard is unavailable in some contexts — fall back to execCommand
     const ta = document.createElement('textarea');
     ta.value = text.trim();
     ta.style.position = 'fixed';

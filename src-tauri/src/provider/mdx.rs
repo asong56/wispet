@@ -5,10 +5,16 @@
 //!   - Key block: compressed (zlib or lzo) list of (offset, headword) pairs
 //!   - Record block: compressed content blocks, indexed by key offset
 //!
-//! This implementation supports MDX v2 (UTF-16 headwords, zlib compression),
-//! which covers the vast majority of modern dictionaries.
-//! MDD (media) files are handled as a sibling file; resources are served
-//! via the `wispet://mdd/` custom protocol registered in main.rs.
+//! Supports MDX v2 (UTF-16 headwords) with zlib and LZO1X block compression
+//! (comp_type 0x02000000 / 0x01000000 — see
+//! https://github.com/zhansliu/writemdict/blob/master/fileformat.md).
+//! Older "engine 1.2" dictionaries are typically LZO-compressed.
+//!
+//! MDD (media sibling file) resources are read by [`MddDict`], which reuses
+//! the MDX block-parsing primitives (same container format). Only the
+//! `sound://` pattern in entry HTML is rewritten to the `wispet://mdd/...`
+//! protocol (handled in main.rs); bare `<img src="...">` references with no
+//! scheme prefix are not rewritten and will not resolve.
 
 use super::{Provider, ProviderResult, ResultKind};
 use anyhow::{bail, Context, Result};
@@ -28,6 +34,7 @@ use tokio::sync::Mutex;
 
 const MDX_MAGIC: &[u8] = b"MDict dictionary file\x00";
 const RECORD_BLOCK_COMP_NONE: u32 = 0x00000000;
+const RECORD_BLOCK_COMP_LZO: u32 = 0x01000000;
 const RECORD_BLOCK_COMP_ZLIB: u32 = 0x02000000;
 
 // ── Key index entry ───────────────────────────────────────────────────────────
@@ -79,7 +86,6 @@ impl MdxDict {
     pub fn lookup_exact(&self, query: &str) -> Result<Option<String>> {
         let q = query.to_lowercase();
 
-        // Binary search on headword_lower
         let pos = self
             .index
             .partition_point(|e| e.headword_lower.as_str() < q.as_str());
@@ -96,26 +102,23 @@ impl MdxDict {
     fn read_record(&self, entry: &KeyEntry) -> Result<String> {
         let mut file = File::open(&self.path)?;
 
-        // Walk record blocks to find which block contains record_start
-        let mut block_data_offset: u64 = 0; // logical offset within decompressed stream
+        let mut block_data_offset: u64 = 0;
         for (blk_file_off, blk_comp_sz, blk_decomp_sz) in &self.record_blocks {
             let blk_end = block_data_offset + blk_decomp_sz;
 
             if entry.record_start >= block_data_offset && entry.record_start < blk_end {
-                // This block contains our record
                 file.seek(SeekFrom::Start(self.record_section_offset + blk_file_off))?;
 
                 let mut comp_buf = vec![0u8; *blk_comp_sz as usize];
                 file.read_exact(&mut comp_buf)?;
 
-                let decompressed = decompress_block(&comp_buf)?;
+                let decompressed = decompress_block(&comp_buf, *blk_decomp_sz)?;
 
                 let local_start = (entry.record_start - block_data_offset) as usize;
                 let local_end = ((entry.record_end - block_data_offset) as usize)
                     .min(decompressed.len());
 
                 let record_bytes = &decompressed[local_start..local_end];
-                // MDX v2 content is UTF-16LE; v1 is UTF-8 / GB18030
                 let html = decode_content(record_bytes);
                 return Ok(html);
             }
@@ -133,11 +136,9 @@ fn parse_mdx(
     reader: &mut BufReader<File>,
     path: &Path,
 ) -> Result<(Vec<KeyEntry>, Vec<(u64, u64, u64)>, u64)> {
-    // Read header length (4 bytes LE)
     let header_len = read_u32_le(reader)?;
     let mut header_bytes = vec![0u8; header_len as usize];
     reader.read_exact(&mut header_bytes)?;
-    // Skip header checksum (4 bytes)
     let mut _adler = [0u8; 4];
     reader.read_exact(&mut _adler)?;
 
@@ -150,35 +151,30 @@ fn parse_mdx(
     // MDX v2 uses 8-byte counts
     let num_blocks = read_u64_be(reader)?;
     let _num_entries = read_u64_be(reader)?;
-    let _key_index_decomp_size = read_u64_be(reader)?;
+    let key_index_decomp_size = read_u64_be(reader)?;
     let key_index_comp_size = read_u64_be(reader)?;
     let key_blocks_total_size = read_u64_be(reader)?;
-    // Checksum of key block info
     let mut _ck = [0u8; 4];
     reader.read_exact(&mut _ck)?;
 
-    // Read key block info (compressed index of key blocks)
     let mut key_index_comp = vec![0u8; key_index_comp_size as usize];
     reader.read_exact(&mut key_index_comp)?;
 
-    // Key block info: each entry is 40 bytes in v2
-    // (num_entries u64, first_headword_size u16, first_headword UTF-16, last_headword_size u16,
-    //  last_headword UTF-16, comp_size u64, decomp_size u64)
-    // We parse it to get per-block sizes
-    let key_index_decomp = decompress_block(&key_index_comp)?;
+    // Key block info entries (40 bytes in v2): num_entries u64, first_headword_size
+    // u16, first_headword UTF-16, last_headword_size u16, last_headword UTF-16,
+    // comp_size u64, decomp_size u64 — only comp/decomp sizes are needed here.
+    let key_index_decomp = decompress_block(&key_index_comp, key_index_decomp_size)?;
     let key_block_sizes = parse_key_block_info(&key_index_decomp, num_blocks)?;
 
-    // Read and parse all key blocks
     let mut index: Vec<KeyEntry> = Vec::new();
     {
         let key_blocks_start = reader.stream_position()?;
-        for (comp_sz, _decomp_sz) in &key_block_sizes {
+        for (comp_sz, decomp_sz) in &key_block_sizes {
             let mut comp = vec![0u8; *comp_sz as usize];
             reader.read_exact(&mut comp)?;
-            let decomp = decompress_block(&comp)?;
+            let decomp = decompress_block(&comp, *decomp_sz)?;
             parse_key_block(&decomp, &mut index)?;
         }
-        // Verify we consumed exactly key_blocks_total_size
         let consumed = reader.stream_position()? - key_blocks_start;
         if consumed != key_blocks_total_size {
             log::warn!(
@@ -188,17 +184,15 @@ fn parse_mdx(
         }
     }
 
-    // Sort index by lowercased headword for binary search
     index.sort_by(|a, b| a.headword_lower.cmp(&b.headword_lower));
 
-    // Read record block section header
     let num_record_blocks = read_u64_be(reader)?;
     let _num_entries2 = read_u64_be(reader)?;
     let record_index_size = read_u64_be(reader)?;
     let _record_blocks_total_size = read_u64_be(reader)?;
 
-    // Read record block info
-    let mut record_blocks: Vec<(u64, u64, u64)> = Vec::new(); // (file_relative_offset, comp_sz, decomp_sz)
+    // (file_relative_offset, comp_sz, decomp_sz) per block
+    let mut record_blocks: Vec<(u64, u64, u64)> = Vec::new();
     {
         let mut running_offset: u64 = 0;
         for _ in 0..num_record_blocks {
@@ -279,7 +273,6 @@ fn fill_record_ends(index: &mut Vec<KeyEntry>) {
     let len = index.len();
     if len == 0 { return; }
 
-    // Build an order sorted by record_start without disturbing the headword order.
     let mut by_offset: Vec<usize> = (0..len).collect();
     by_offset.sort_by_key(|&i| index[i].record_start);
 
@@ -292,7 +285,7 @@ fn fill_record_ends(index: &mut Vec<KeyEntry>) {
     }
 }
 
-fn decompress_block(data: &[u8]) -> Result<Vec<u8>> {
+fn decompress_block(data: &[u8], decompressed_size: u64) -> Result<Vec<u8>> {
     if data.len() < 8 {
         // A valid MDX block always has at least a 4-byte type tag and 4-byte
         // checksum before any payload.  Anything shorter is corrupt data.
@@ -304,9 +297,18 @@ fn decompress_block(data: &[u8]) -> Result<Vec<u8>> {
 
     match comp_type {
         RECORD_BLOCK_COMP_NONE => Ok(payload.to_vec()),
+        RECORD_BLOCK_COMP_LZO => {
+            // LZO1X decompression is not self-terminating like zlib — the
+            // exact output size must be known ahead of time (it's given by
+            // the block's decomp_sz field in the key/record block index).
+            let mut out = vec![0u8; decompressed_size as usize];
+            lzo1x::decompress(payload, &mut out)
+                .map_err(|e| anyhow::anyhow!("LZO decompression failed: {:?}", e))?;
+            Ok(out)
+        }
         RECORD_BLOCK_COMP_ZLIB => {
             let mut decoder = ZlibDecoder::new(payload);
-            let mut out = Vec::new();
+            let mut out = Vec::with_capacity(decompressed_size as usize);
             decoder.read_to_end(&mut out)?;
             Ok(out)
         }
@@ -364,6 +366,102 @@ impl Utf16LeExt for String {
     }
 }
 
+// ── MDD (media resource) support ────────────────────────────────────────────
+// Same container format as MDX (see fileformat.md), so `parse_mdx` is reused
+// verbatim; only the semantics differ — keys are resource paths and records
+// are raw bytes rather than UTF-16 HTML text.
+
+/// Reads an MDD (MDict resource container) file: pronunciation audio,
+/// images, and stylesheets bundled alongside an MDX dictionary.
+pub struct MddDict {
+    path: PathBuf,
+    /// Sorted by (lowercased) resource path for binary search — reuses
+    /// KeyEntry from the MDX index; `headword` holds the resource path.
+    index: Vec<KeyEntry>,
+    record_blocks: Vec<(u64, u64, u64)>,
+    record_section_offset: u64,
+}
+
+impl MddDict {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let file = File::open(&path)
+            .with_context(|| format!("Cannot open MDD file: {}", path.display()))?;
+        let mut reader = BufReader::new(file);
+
+        let (index, record_blocks, record_section_offset) = parse_mdx(&mut reader, &path)?;
+
+        Ok(MddDict {
+            path,
+            index,
+            record_blocks,
+            record_section_offset,
+        })
+    }
+
+    /// Look up a resource by the path referenced from MDX HTML (e.g.
+    /// `word.mp3` from a rewritten `sound://word.mp3` link). MDD entries are
+    /// conventionally stored with a leading backslash and backslash
+    /// separators (Windows-style, regardless of the platform that built the
+    /// dictionary) — since the exact convention varies between dictionaries,
+    /// a few common variants are tried.
+    pub fn lookup_resource(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        let normalized_fwd = name.trim_start_matches(['/', '\\']);
+        let normalized_back = normalized_fwd.replace('/', "\\");
+
+        let candidates = [
+            name.to_string(),
+            format!("\\{}", normalized_back),
+            format!("/{}", normalized_fwd),
+            normalized_back.clone(),
+            normalized_fwd.to_string(),
+        ];
+
+        let mut tried = std::collections::HashSet::new();
+        for cand in &candidates {
+            let cand_lower = cand.to_lowercase();
+            if !tried.insert(cand_lower.clone()) {
+                continue;
+            }
+            let pos = self
+                .index
+                .partition_point(|e| e.headword_lower.as_str() < cand_lower.as_str());
+            if let Some(entry) = self.index.get(pos).filter(|e| e.headword_lower == cand_lower) {
+                return Ok(Some(self.read_record_bytes(entry)?));
+            }
+        }
+        Ok(None)
+    }
+
+    fn read_record_bytes(&self, entry: &KeyEntry) -> Result<Vec<u8>> {
+        let mut file = File::open(&self.path)?;
+
+        let mut block_data_offset: u64 = 0;
+        for (blk_file_off, blk_comp_sz, blk_decomp_sz) in &self.record_blocks {
+            let blk_end = block_data_offset + blk_decomp_sz;
+
+            if entry.record_start >= block_data_offset && entry.record_start < blk_end {
+                file.seek(SeekFrom::Start(self.record_section_offset + blk_file_off))?;
+
+                let mut comp_buf = vec![0u8; *blk_comp_sz as usize];
+                file.read_exact(&mut comp_buf)?;
+
+                let decompressed = decompress_block(&comp_buf, *blk_decomp_sz)?;
+
+                let local_start = (entry.record_start - block_data_offset) as usize;
+                let local_end = ((entry.record_end - block_data_offset) as usize)
+                    .min(decompressed.len());
+
+                return Ok(decompressed[local_start..local_end].to_vec());
+            }
+
+            block_data_offset += blk_decomp_sz;
+        }
+
+        bail!("MDD resource not found in any block: {}", entry.headword)
+    }
+}
+
 // ── Provider impl ─────────────────────────────────────────────────────────────
 
 pub struct MdxProvider {
@@ -406,13 +504,10 @@ impl Provider for MdxProvider {
 
 /// Strip potentially dangerous tags/attrs from MDX HTML output.
 fn sanitize_mdx_html(html: String) -> String {
-    // Remove <script> blocks
     let re_script = regex_lite::Regex::new(r"(?si)<script[^>]*>.*?</script>").unwrap();
     let html = re_script.replace_all(&html, "").to_string();
-    // Remove on* event attributes
     let re_on = regex_lite::Regex::new(r#"(?i)\s+on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
     let html = re_on.replace_all(&html, "").to_string();
-    // Rewrite `sound://` links to wispet protocol
     html.replace("sound://", "wispet://mdd/sound/")
         .replace("entry://", "#")
 }

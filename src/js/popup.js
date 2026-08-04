@@ -12,7 +12,7 @@
  *   - "Open in Wispet" button → shows main window with same query
  */
 
-import { lookup, getConfig, hidePopup, showMainWindow } from './ipc.js';
+import { lookup, getConfig, hidePopup, showMainWindow, emitOpenQuery } from './ipc.js';
 import { renderResult, renderLoading } from './render.js';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -44,18 +44,17 @@ async function init() {
     if (e.key === 'Escape') dismiss();
   });
 
-  // Tauri: hide on blur
   window.addEventListener('blur', () => {
-    // Small delay to allow button clicks inside to register
+    // Delay lets a click on a button inside the popup register before it hides
     setTimeout(dismiss, 200);
   });
 
-  // Rust calls this when it wants to show the popup with a query
+  // Rust (main.rs) calls this via win.eval() to show the popup with a query
   window.onWispetQuery = (query) => {
     handleQuery(query);
   };
 
-  // If query was already set before this script loaded
+  // Query may already be set if this script loads after Rust's eval() call
   if (window.__wispet_query__) {
     handleQuery(window.__wispet_query__);
   }
@@ -68,16 +67,13 @@ async function handleQuery(query) {
 
   currentQuery = query.trim();
 
-  // Update header
   if (queryWord) queryWord.textContent = currentQuery;
 
-  // Show loading
   if (resultsEl) {
     resultsEl.innerHTML = '';
     resultsEl.appendChild(renderLoading(''));
   }
 
-  // Reset dismiss timer
   resetDismissTimer();
 
   try {
@@ -134,14 +130,9 @@ async function openInMain() {
   clearTimeout(dismissTimer);
   try {
     await showMainWindow();
-    // Signal the main window to search for the current query
-    // Tauri v2: WebviewWindow.getByLabel is on the WebviewWindow class
-    const { WebviewWindow } = window.__TAURI__.webviewWindow;
-    const mainWin = await WebviewWindow.getByLabel('main');
-    await mainWin?.eval(
-      `document.getElementById('search-input').value = ${JSON.stringify(currentQuery)};
-       document.getElementById('search-input').dispatchEvent(new Event('input'));`
-    );
+    // eval() isn't available on the JS-side window handle, so broadcast
+    // an event instead — see onOpenQuery() in main.js.
+    await emitOpenQuery(currentQuery);
   } catch {}
   dismiss();
 }

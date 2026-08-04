@@ -36,9 +36,6 @@ impl Provider for GoogleProvider {
             return Ok(None);
         }
 
-        // Google Translate unofficial single-sentence endpoint
-        // Returns a nested JSON array; position [0][0][0] is the translation,
-        // [0][0][1] is the source text, [2] is the detected source language.
         let sl = if self.source_lang == "auto" { "auto" } else { &self.source_lang };
         let url = format!(
             "https://translate.googleapis.com/translate_a/single\
@@ -56,13 +53,16 @@ impl Provider for GoogleProvider {
 
         let raw: serde_json::Value = resp.json().await?;
 
-        // Parse nested array: [[["translation","source","","",""],...],...,"detected_lang",...]
-        let translation = raw
-            .get(0)
-            .and_then(|a| a.get(0))
-            .and_then(|a| a.get(0))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        // Undocumented response shape: raw[0] is an array of per-sentence
+        // segments (each ["translation","source","",""]), raw[2] is the
+        // detected source language. Multi-sentence input is split across
+        // multiple segments, so all of them must be concatenated.
+        let translation = raw.get(0).and_then(|segments| segments.as_array()).map(|segments| {
+            segments
+                .iter()
+                .filter_map(|seg| seg.get(0).and_then(|v| v.as_str()))
+                .collect::<String>()
+        });
 
         let detected = raw
             .get(2)

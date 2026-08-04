@@ -24,7 +24,6 @@ export async function initSettings(config, onSaved) {
   renderProvidersPane();
   renderAboutPane();
 
-  // Config path
   try {
     const path = await getConfigPath();
     const el = document.getElementById('config-path');
@@ -133,24 +132,21 @@ function renderGeneralPane() {
     </div>
   `;
 
-  // Hotkey recorder
   pane.querySelectorAll('.hotkey-input').forEach(el => {
     el.addEventListener('click', () => startHotkeyRecording(el));
     el.addEventListener('keydown', e => { e.preventDefault(); });
   });
 
-  // Theme switcher
   pane.querySelectorAll('.theme-switcher button').forEach(btn => {
     btn.addEventListener('click', () => {
       pane.querySelectorAll('.theme-switcher button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       _config.general.theme = btn.dataset.themeVal;
-      // Live preview
+      // Live preview — not saved until onSave()
       applyThemePreview(_config.general.theme);
     });
   });
 
-  // Dismiss input
   pane.querySelector('#popup-dismiss-input')?.addEventListener('change', e => {
     const secs = parseInt(e.target.value) || 0;
     _config.general.popup_dismiss_ms = secs * 1000;
@@ -195,7 +191,6 @@ function startHotkeyRecording(el) {
 
   document.addEventListener('keydown', listener, true);
 
-  // Click elsewhere cancels
   const cancel = () => {
     cancelRecording(el, listener);
     document.removeEventListener('click', cancel);
@@ -283,13 +278,11 @@ function renderProviderList() {
       </label>
     `;
 
-    // Toggle
     item.querySelector('input[type="checkbox"]').addEventListener('change', e => {
       const realIdx = getProviderRealIndex(entry);
       if (realIdx >= 0) _config.providers.list[realIdx].enabled = e.target.checked;
     });
 
-    // API key row for deepl
     if (entry.kind === 'deepl') {
       const keyRow = document.createElement('div');
       keyRow.className = 'api-key-row';
@@ -307,7 +300,6 @@ function renderProviderList() {
       list.appendChild(item);
     }
 
-    // Drag & drop reorder
     setupDragOnItem(item, sorted, list);
   });
 }
@@ -343,7 +335,6 @@ function setupDragOnItem(item, sorted, list) {
     const srcIdx = parseInt(_dragSrc.dataset.idx);
     const dstIdx = parseInt(item.dataset.idx);
 
-    // Reorder priorities
     const reordered = [...sorted];
     const [moved] = reordered.splice(srcIdx, 1);
     reordered.splice(dstIdx, 0, moved);
@@ -365,8 +356,8 @@ function getProviderRealIndex(entry) {
 
 async function addMdxDict() {
   try {
-    // Tauri v2: the dialog plugin is exposed under __TAURI_PLUGIN_DIALOG__
-    const { open } = window.__TAURI_PLUGIN_DIALOG__;
+    // Tauri v2 exposes plugin-dialog at window.__TAURI__.dialog
+    const { open } = window.__TAURI__.dialog;
     const selected = await open({
       filters: [{ name: 'MDict Dictionary', extensions: ['mdx'] }],
       multiple: false,

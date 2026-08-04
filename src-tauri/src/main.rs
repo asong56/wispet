@@ -83,8 +83,6 @@ pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
 
 pub fn register_shortcuts(app: &AppHandle, cfg: &config::Config) -> Result<()> {
     let mgr = app.global_shortcut();
-
-    // Unregister all before re-registering
     mgr.unregister_all()?;
 
     let hotkey_main = cfg.general.hotkey_main.clone();
@@ -125,7 +123,6 @@ fn toggle_main_window(app: &AppHandle) {
 }
 
 fn trigger_popup(app: &AppHandle) {
-    // Read clipboard
     let text = {
         use arboard::Clipboard;
         Clipboard::new()
@@ -137,7 +134,6 @@ fn trigger_popup(app: &AppHandle) {
         return;
     }
 
-    // Get mouse position for popup placement
     let pos = get_cursor_position();
 
     let _ = app.emit("show-popup", serde_json::json!({
@@ -148,27 +144,12 @@ fn trigger_popup(app: &AppHandle) {
 }
 
 fn get_cursor_position() -> (i32, i32) {
-    // Platform-specific cursor position
-    // Fallback to (0, 0) if unavailable
-    #[cfg(target_os = "macos")]
-    {
-        // Use NSEvent.mouseLocation via objc (simplified — returns (0,0) for now)
-        (0, 0)
+    // Linux: queries X11, so this returns (0, 0) under a pure-Wayland session.
+    use mouse_position::mouse_position::Mouse;
+    match Mouse::get_mouse_position() {
+        Mouse::Position { x, y } => (x, y),
+        Mouse::Error => (0, 0),
     }
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-        use windows::Win32::Foundation::POINT;
-        unsafe {
-            let mut pt = POINT::default();
-            if GetCursorPos(&mut pt).is_ok() {
-                return (pt.x, pt.y);
-            }
-        }
-        (0, 0)
-    }
-    #[cfg(target_os = "linux")]
-    { (0, 0) }
 }
 
 /// Parse a shortcut string like "Alt+D" or "Ctrl+Shift+W"
@@ -218,6 +199,82 @@ fn str_to_code(s: &str) -> Result<Code> {
     Ok(code)
 }
 
+// ── wispet:// media protocol ──────────────────────────────────────────────────
+// Resolves wispet://mdd/<category>/<name> requests (rewritten from sound://
+// links by sanitize_mdx_html in provider/mdx.rs) against the loaded MDX
+// dictionaries' sibling .mdd files.
+
+/// Matches loosely on the "mdd/" marker rather than a strict scheme/host/path
+/// split, since custom-protocol URL shape varies slightly across platforms.
+fn extract_wispet_resource_name(uri: &str) -> Option<String> {
+    let after_mdd = uri.split("mdd/").nth(1)?;
+    let raw_name = after_mdd.split('/').nth(1).unwrap_or(after_mdd);
+    if raw_name.is_empty() {
+        return None;
+    }
+    Some(
+        urlencoding::decode(raw_name)
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| raw_name.to_string()),
+    )
+}
+
+/// Re-parses each candidate .mdd's key index per call rather than caching —
+/// runs off the main thread, so simple and correct beats fast here unless it
+/// becomes a bottleneck for very large dictionaries.
+fn resolve_mdd_resource(app: &AppHandle, name: &str) -> Option<Vec<u8>> {
+    let state = app.state::<AppState>();
+    let cfg = state.config.blocking_lock().clone();
+
+    for entry in &cfg.providers.list {
+        if entry.kind != "mdx" {
+            continue;
+        }
+        let Some(mdx_path) = &entry.path else { continue };
+        let mdx_path = std::path::Path::new(mdx_path);
+
+        for ext in ["mdd", "MDD"] {
+            let mdd_path = mdx_path.with_extension(ext);
+            if !mdd_path.is_file() {
+                continue;
+            }
+            match provider::mdx::MddDict::open(&mdd_path) {
+                Ok(mdd) => match mdd.lookup_resource(name) {
+                    Ok(Some(bytes)) => return Some(bytes),
+                    Ok(None) => {}
+                    Err(e) => log::warn!("MDD lookup error in {}: {:#}", mdd_path.display(), e),
+                },
+                Err(e) => log::warn!("Failed to open MDD file {}: {:#}", mdd_path.display(), e),
+            }
+        }
+    }
+    None
+}
+
+fn guess_mime(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "css" => "text/css",
+        "js" => "application/javascript",
+        _ => "application/octet-stream",
+    }
+}
+
+fn wispet_not_found() -> http::Response<Vec<u8>> {
+    http::Response::builder()
+        .status(http::StatusCode::NOT_FOUND)
+        .body(Vec::new())
+        .unwrap()
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -239,7 +296,23 @@ fn main() {
         .manage(state)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
+        .register_asynchronous_uri_scheme_protocol("wispet", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let uri_str = request.uri().to_string();
+            std::thread::spawn(move || {
+                let response = match extract_wispet_resource_name(&uri_str) {
+                    Some(name) => match resolve_mdd_resource(&app, &name) {
+                        Some(bytes) => http::Response::builder()
+                            .header(http::header::CONTENT_TYPE, guess_mime(&name))
+                            .body(bytes)
+                            .unwrap(),
+                        None => wispet_not_found(),
+                    },
+                    None => wispet_not_found(),
+                };
+                responder.respond(response);
+            });
+        })
         .setup(|app| {
             let handle = app.handle().clone();
 

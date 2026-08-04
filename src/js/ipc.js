@@ -3,7 +3,10 @@
  * Wraps invoke() and event.listen() with typed, documented helpers.
  */
 
-const { invoke, event } = window.__TAURI__;
+// Tauri v2 with withGlobalTauri: invoke lives at __TAURI__.core.invoke
+// (not __TAURI__.invoke, which was the v1 layout); event stays top-level.
+const { invoke } = window.__TAURI__.core;
+const { event } = window.__TAURI__;
 
 // ── Lookup ────────────────────────────────────────────────────────────────────
 
@@ -79,4 +82,22 @@ export function onClipboardChange(handler) {
  */
 export function onShowPopup(handler) {
   return event.listen('show-popup', e => handler(e.payload));
+}
+
+/**
+ * Broadcast a query from the popup window to the main window. WebviewWindow#eval
+ * is a Rust-only API (not exposed on the JS-side window object), so we use
+ * the event system instead of cross-window scripting.
+ * @param {string} query
+ */
+export function emitOpenQuery(query) {
+  return event.emit('open-query', query);
+}
+
+/**
+ * Listen for a query broadcast from the popup window (see emitOpenQuery).
+ * @param {(query: string) => void} handler
+ */
+export function onOpenQuery(handler) {
+  return event.listen('open-query', e => handler(e.payload));
 }
