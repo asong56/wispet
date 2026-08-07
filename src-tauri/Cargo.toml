@@ -17,6 +17,7 @@ tauri = { version = "2", features = [
   "tray-icon",
   "image-png",
   "image-ico",
+  "unstable",
 ] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
