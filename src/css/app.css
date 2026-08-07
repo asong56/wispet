@@ -8,7 +8,6 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  /* Tauri transparent window base */
   background: transparent;
 }
 
@@ -20,7 +19,6 @@ html, body {
   background: var(--color-bg);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  /* Window shadow via CSS (Tauri shadow:true handles OS-level) */
   box-shadow: var(--shadow-lg);
 }
 
@@ -330,8 +328,25 @@ section.result-loading {
 /* ── Settings view ──────────────────────────────────────────────────────────── */
 #settings-view {
   flex: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  grid-template-rows: 1fr auto;
   overflow: hidden;
+}
+
+.settings-nav {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.settings-content {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.save-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 
 .settings-nav {
