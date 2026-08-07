@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 
 // ── MDX file constants ────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const MDX_MAGIC: &[u8] = b"MDict dictionary file\x00";
 const RECORD_BLOCK_COMP_NONE: u32 = 0x00000000;
 const RECORD_BLOCK_COMP_LZO: u32 = 0x01000000;
@@ -35,7 +36,6 @@ struct KeyEntry {
 
 pub struct MdxDict {
     path: PathBuf,
-    label: String,
     /// Sorted by headword_lower for binary search
     index: Vec<KeyEntry>,
     /// (block_offset, block_compressed_size, block_decompressed_size)
@@ -45,7 +45,7 @@ pub struct MdxDict {
 }
 
 impl MdxDict {
-    pub fn open(path: impl AsRef<Path>, label: String) -> Result<Self> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path)
             .with_context(|| format!("Cannot open MDX file: {}", path.display()))?;
@@ -56,7 +56,6 @@ impl MdxDict {
 
         Ok(MdxDict {
             path,
-            label,
             index,
             record_blocks,
             record_section_offset,
@@ -141,6 +140,9 @@ fn parse_mdx(
     let mut key_index_comp = vec![0u8; key_index_comp_size as usize];
     reader.read_exact(&mut key_index_comp)?;
 
+    // Key block info entries (40 bytes in v2): num_entries u64, first_headword_size
+    // u16, first_headword UTF-16, last_headword_size u16, last_headword UTF-16,
+    // comp_size u64, decomp_size u64 — only comp/decomp sizes are needed here.
     let key_index_decomp = decompress_block(&key_index_comp, key_index_decomp_size)?;
     let key_block_sizes = parse_key_block_info(&key_index_decomp, num_blocks)?;
 
@@ -243,6 +245,10 @@ fn parse_key_block(data: &[u8], index: &mut Vec<KeyEntry>) -> Result<()> {
     Ok(())
 }
 
+/// After all key blocks have been collected and sorted by headword, patch each
+/// entry's record_end by sorting a separate index by record_start and chaining
+/// adjacent offsets. The last entry gets u64::MAX as a sentinel; read_record
+/// clamps to decompressed.len() so it is safe.
 fn fill_record_ends(index: &mut Vec<KeyEntry>) {
     let len = index.len();
     if len == 0 { return; }
@@ -340,8 +346,17 @@ impl Utf16LeExt for String {
     }
 }
 
+// ── MDD (media resource) support ────────────────────────────────────────────
+// Same container format as MDX (see fileformat.md), so `parse_mdx` is reused
+// verbatim; only the semantics differ — keys are resource paths and records
+// are raw bytes rather than UTF-16 HTML text.
+
+/// Reads an MDD (MDict resource container) file: pronunciation audio,
+/// images, and stylesheets bundled alongside an MDX dictionary.
 pub struct MddDict {
     path: PathBuf,
+    /// Sorted by (lowercased) resource path for binary search — reuses
+    /// KeyEntry from the MDX index; `headword` holds the resource path.
     index: Vec<KeyEntry>,
     record_blocks: Vec<(u64, u64, u64)>,
     record_section_offset: u64,
@@ -364,6 +379,12 @@ impl MddDict {
         })
     }
 
+    /// Look up a resource by the path referenced from MDX HTML (e.g.
+    /// `word.mp3` from a rewritten `sound://word.mp3` link). MDD entries are
+    /// conventionally stored with a leading backslash and backslash
+    /// separators (Windows-style, regardless of the platform that built the
+    /// dictionary) — since the exact convention varies between dictionaries,
+    /// a few common variants are tried.
     pub fn lookup_resource(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let normalized_fwd = name.trim_start_matches(['/', '\\']);
         let normalized_back = normalized_fwd.replace('/', "\\");
@@ -431,7 +452,7 @@ pub struct MdxProvider {
 
 impl MdxProvider {
     pub fn new(path: impl AsRef<Path>, label: String, id: String) -> Result<Self> {
-        let dict = MdxDict::open(path, label.clone())?;
+        let dict = MdxDict::open(path)?;
         Ok(MdxProvider {
             id,
             label,
@@ -461,6 +482,7 @@ impl Provider for MdxProvider {
     }
 }
 
+/// Strip potentially dangerous tags/attrs from MDX HTML output.
 fn sanitize_mdx_html(html: String) -> String {
     let re_script = regex_lite::Regex::new(r"(?si)<script[^>]*>.*?</script>").unwrap();
     let html = re_script.replace_all(&html, "").to_string();
