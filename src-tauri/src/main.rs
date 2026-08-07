@@ -8,9 +8,8 @@ mod tray;
 
 use anyhow::Result;
 use provider::Provider;
-use std::sync::Arc;
 use tauri::{
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Listener, Manager,
     webview::WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
