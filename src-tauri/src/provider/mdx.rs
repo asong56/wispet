@@ -1,28 +1,9 @@
-//! MDX/MDD local dictionary provider.
-//!
-//! MDX format overview:
-//!   - File header: magic bytes + version + encryption flag + key block count
-//!   - Key block: compressed (zlib or lzo) list of (offset, headword) pairs
-//!   - Record block: compressed content blocks, indexed by key offset
-//!
-//! Supports MDX v2 (UTF-16 headwords) with zlib and LZO1X block compression
-//! (comp_type 0x02000000 / 0x01000000 — see
-//! https://github.com/zhansliu/writemdict/blob/master/fileformat.md).
-//! Older "engine 1.2" dictionaries are typically LZO-compressed.
-//!
-//! MDD (media sibling file) resources are read by [`MddDict`], which reuses
-//! the MDX block-parsing primitives (same container format). Only the
-//! `sound://` pattern in entry HTML is rewritten to the `wispet://mdd/...`
-//! protocol (handled in main.rs); bare `<img src="...">` references with no
-//! scheme prefix are not rewritten and will not resolve.
-
 use super::{Provider, ProviderResult, ResultKind};
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use encoding_rs::UTF_16LE;
 use flate2::read::ZlibDecoder;
 use std::{
-    collections::BTreeMap,
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -90,10 +71,10 @@ impl MdxDict {
             .index
             .partition_point(|e| e.headword_lower.as_str() < q.as_str());
 
-        let entry = self
-            .index
-            .get(pos)
-            .filter(|e| e.headword_lower == q)?;
+        let entry = match self.index.get(pos).filter(|e| e.headword_lower == q) {
+            Some(entry) => entry,
+            None => return Ok(None),
+        };
 
         let html = self.read_record(entry)?;
         Ok(Some(html))
@@ -134,7 +115,7 @@ impl MdxDict {
 
 fn parse_mdx(
     reader: &mut BufReader<File>,
-    path: &Path,
+    _path: &Path,
 ) -> Result<(Vec<KeyEntry>, Vec<(u64, u64, u64)>, u64)> {
     let header_len = read_u32_le(reader)?;
     let mut header_bytes = vec![0u8; header_len as usize];
@@ -160,9 +141,6 @@ fn parse_mdx(
     let mut key_index_comp = vec![0u8; key_index_comp_size as usize];
     reader.read_exact(&mut key_index_comp)?;
 
-    // Key block info entries (40 bytes in v2): num_entries u64, first_headword_size
-    // u16, first_headword UTF-16, last_headword_size u16, last_headword UTF-16,
-    // comp_size u64, decomp_size u64 — only comp/decomp sizes are needed here.
     let key_index_decomp = decompress_block(&key_index_comp, key_index_decomp_size)?;
     let key_block_sizes = parse_key_block_info(&key_index_decomp, num_blocks)?;
 
@@ -188,7 +166,7 @@ fn parse_mdx(
 
     let num_record_blocks = read_u64_be(reader)?;
     let _num_entries2 = read_u64_be(reader)?;
-    let record_index_size = read_u64_be(reader)?;
+    let _record_index_size = read_u64_be(reader)?;
     let _record_blocks_total_size = read_u64_be(reader)?;
 
     // (file_relative_offset, comp_sz, decomp_sz) per block
@@ -265,10 +243,6 @@ fn parse_key_block(data: &[u8], index: &mut Vec<KeyEntry>) -> Result<()> {
     Ok(())
 }
 
-/// After all key blocks have been collected and sorted by headword, patch each
-/// entry's record_end by sorting a separate index by record_start and chaining
-/// adjacent offsets. The last entry gets u64::MAX as a sentinel; read_record
-/// clamps to decompressed.len() so it is safe.
 fn fill_record_ends(index: &mut Vec<KeyEntry>) {
     let len = index.len();
     if len == 0 { return; }
@@ -366,17 +340,8 @@ impl Utf16LeExt for String {
     }
 }
 
-// ── MDD (media resource) support ────────────────────────────────────────────
-// Same container format as MDX (see fileformat.md), so `parse_mdx` is reused
-// verbatim; only the semantics differ — keys are resource paths and records
-// are raw bytes rather than UTF-16 HTML text.
-
-/// Reads an MDD (MDict resource container) file: pronunciation audio,
-/// images, and stylesheets bundled alongside an MDX dictionary.
 pub struct MddDict {
     path: PathBuf,
-    /// Sorted by (lowercased) resource path for binary search — reuses
-    /// KeyEntry from the MDX index; `headword` holds the resource path.
     index: Vec<KeyEntry>,
     record_blocks: Vec<(u64, u64, u64)>,
     record_section_offset: u64,
@@ -399,12 +364,6 @@ impl MddDict {
         })
     }
 
-    /// Look up a resource by the path referenced from MDX HTML (e.g.
-    /// `word.mp3` from a rewritten `sound://word.mp3` link). MDD entries are
-    /// conventionally stored with a leading backslash and backslash
-    /// separators (Windows-style, regardless of the platform that built the
-    /// dictionary) — since the exact convention varies between dictionaries,
-    /// a few common variants are tried.
     pub fn lookup_resource(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let normalized_fwd = name.trim_start_matches(['/', '\\']);
         let normalized_back = normalized_fwd.replace('/', "\\");
@@ -502,7 +461,6 @@ impl Provider for MdxProvider {
     }
 }
 
-/// Strip potentially dangerous tags/attrs from MDX HTML output.
 fn sanitize_mdx_html(html: String) -> String {
     let re_script = regex_lite::Regex::new(r"(?si)<script[^>]*>.*?</script>").unwrap();
     let html = re_script.replace_all(&html, "").to_string();
