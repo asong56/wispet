@@ -1,10 +1,3 @@
-/**
- * render.js — Provider result rendering helpers.
- * Pure DOM — no framework, no state. Called from main.js and popup.js.
- */
-
-// ── SVG icons (inline, fill=currentColor) ─────────────────────────────────────
-
 export const ICONS = {
   database: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26C75.29,26,34,49.72,34,80v96c0,30.28,41.29,54,94,54s94-23.72,94-54V80C222,49.72,180.71,26,128,26Zm0,12c44.45,0,82,19.23,82,42s-37.55,42-82,42S46,102.77,46,80,83.55,38,128,38Zm82,138c0,22.77-37.55,42-82,42s-82-19.23-82-42V154.79C62,171.16,92.37,182,128,182s66-10.84,82-27.21Zm0-48c0,22.77-37.55,42-82,42s-82-19.23-82-42V106.79C62,123.16,92.37,134,128,134s66-10.84,82-27.21Z"/></svg>`,
   globe: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm89.8,96H173.89c-1.54-40.77-18.48-68.23-30.43-82.67A90.19,90.19,0,0,1,217.8,122ZM128,215.83a110,110,0,0,1-15.19-19.45A128.37,128.37,0,0,1,94.13,134h67.74a128.37,128.37,0,0,1-18.68,62.38A110,110,0,0,1,128,215.83ZM94.13,122a128.37,128.37,0,0,1,18.68-62.38A110,110,0,0,1,128,40.17a110,110,0,0,1,15.19,19.45A128.37,128.37,0,0,1,161.87,122Zm18.41-82.67c-12,14.44-28.89,41.9-30.43,82.67H38.2A90.19,90.19,0,0,1,112.54,39.33ZM38.2,134H82.11c1.54,40.77,18.48,68.23,30.43,82.67A90.19,90.19,0,0,1,38.2,134Zm105.26,82.67c11.95-14.44,28.89-41.9,30.43-82.67H217.8A90.19,90.19,0,0,1,143.46,216.67Z"/></svg>`,
@@ -18,8 +11,6 @@ const KIND_ICON = {
   article: ICONS.article,
 };
 
-// ── Sanitize MDX HTML ─────────────────────────────────────────────────────────
-
 const ALLOWED_TAGS = new Set([
   'p','br','span','div','b','strong','i','em','u','s','sup','sub',
   'ul','ol','li','dl','dt','dd','table','thead','tbody','tr','th','td',
@@ -29,12 +20,6 @@ const ALLOWED_TAGS = new Set([
 
 const ALLOWED_ATTRS = new Set(['href','src','alt','title','lang','class','colspan','rowspan']);
 
-/**
- * Sanitize HTML string using DOMParser — allow-list approach.
- * Returns safe HTML string.
- * @param {string} html
- * @returns {string}
- */
 export function sanitizeHtml(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   doc.querySelectorAll('script,style,link,meta,object,iframe,noscript').forEach(el => el.remove());
@@ -46,7 +31,6 @@ export function sanitizeHtml(html) {
   while (node) {
     const tag = node.tagName.toLowerCase();
     if (!ALLOWED_TAGS.has(tag)) {
-      // Unwrap: keep children, remove the disallowed element itself
       toRemove.push(node);
     } else {
       for (const attr of [...node.attributes]) {
@@ -61,8 +45,8 @@ export function sanitizeHtml(html) {
     node = walker.nextNode();
   }
 
-  // Reverse (bottom-up) order so child disallowed nodes are unwrapped before
-  // their parent — otherwise replaceWith can leave orphaned subtrees.
+  // Bottom-up so child disallowed nodes unwrap before their parent —
+  // otherwise replaceWith can leave orphaned subtrees.
   for (let i = toRemove.length - 1; i >= 0; i--) {
     const el = toRemove[i];
     el.replaceWith(...el.childNodes);
@@ -71,13 +55,6 @@ export function sanitizeHtml(html) {
   return doc.body.innerHTML;
 }
 
-// ── Build result section DOM ──────────────────────────────────────────────────
-
-/**
- * Render a ProviderResult into a <section class="result"> element.
- * @param {import('./ipc.js').ProviderResult} result
- * @returns {HTMLElement}
- */
 export function renderResult(result) {
   const section = document.createElement('section');
   section.className = 'result';
@@ -137,21 +114,11 @@ export function renderResult(result) {
   return section;
 }
 
-// ── Pronunciation audio (wispet://mdd/sound/... links) ─────────────────────────
-//
-// MDX entries embed pronunciation as an `<a href="sound://word.mp3">` link
-// (rewritten server-side to `wispet://mdd/sound/word.mp3` — see
-// sanitize_mdx_html in provider/mdx.rs). Left alone, clicking it would
-// navigate the whole window to that URL; intercept the click and play it
-// through a shared <audio> element instead.
-
 let sharedAudio = null;
 
-/**
- * Delegate clicks on `wispet://mdd/sound/...` links within `container` to
- * audio playback instead of navigation.
- * @param {HTMLElement} container
- */
+// MDX pronunciation links are rewritten server-side to wispet://mdd/sound/...
+// (see sanitize_mdx_html in provider/mdx.rs); intercept clicks and play
+// through a shared <audio> instead of letting them navigate the window.
 function attachAudioLinks(container) {
   container.addEventListener('click', (e) => {
     const link = e.target.closest('a[href^="wispet://mdd/sound/"]');
@@ -161,17 +128,10 @@ function attachAudioLinks(container) {
       sharedAudio = new Audio();
     }
     sharedAudio.src = link.getAttribute('href');
-    sharedAudio.play().catch(() => {
-      // Autoplay/decoding errors are non-fatal — pronunciation is a nice-to-have.
-    });
+    sharedAudio.play().catch(() => {});
   });
 }
 
-/**
- * Render a loading skeleton for a provider (while waiting for result).
- * @param {string} label
- * @returns {HTMLElement}
- */
 export function renderLoading(label) {
   const section = document.createElement('section');
   section.className = 'result-loading';
@@ -191,14 +151,6 @@ export function renderLoading(label) {
   return section;
 }
 
-// ── Copy helper ───────────────────────────────────────────────────────────────
-
-/**
- * Copy text content (strip HTML tags for dict/article) to clipboard.
- * Briefly animates the button to confirm.
- * @param {string} content HTML or plain text
- * @param {HTMLElement} btn
- */
 async function copyContent(content, btn) {
   const tmp = document.createElement('div');
   tmp.innerHTML = content;
@@ -209,7 +161,6 @@ async function copyContent(content, btn) {
     btn.style.color = 'var(--color-accent)';
     setTimeout(() => { btn.style.color = ''; }, 1200);
   } catch {
-    // navigator.clipboard is unavailable in some contexts — fall back to execCommand
     const ta = document.createElement('textarea');
     ta.value = text.trim();
     ta.style.position = 'fixed';

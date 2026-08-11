@@ -1,20 +1,23 @@
-//! Google Translate provider using the public (unofficial) single-token endpoint.
-//! Falls back gracefully; if Google changes their API, set `enabled = false`
-//! and use DeepL instead.
+//! Unofficial public Google Translate endpoint. If Google changes it,
+//! disable this provider in config and use DeepL instead.
 
 use super::{Provider, ProviderResult, ResultKind};
 use anyhow::Result;
 use async_trait::async_trait;
 
 pub struct GoogleProvider {
+    id: String,
+    label: String,
     client: reqwest::Client,
     source_lang: String,
     target_lang: String,
 }
 
 impl GoogleProvider {
-    pub fn new(source_lang: String, target_lang: String) -> Self {
+    pub fn new(id: String, label: String, source_lang: String, target_lang: String) -> Self {
         GoogleProvider {
+            id,
+            label,
             client: reqwest::Client::builder()
                 .user_agent("Mozilla/5.0 (compatible; Wispet/0.1)")
                 .build()
@@ -27,8 +30,8 @@ impl GoogleProvider {
 
 #[async_trait]
 impl Provider for GoogleProvider {
-    fn id(&self) -> &str { "google" }
-    fn label(&self) -> &str { "Google Translate" }
+    fn id(&self) -> &str { &self.id }
+    fn label(&self) -> &str { &self.label }
 
     async fn lookup(&self, query: &str) -> Result<Option<ProviderResult>> {
         if query.trim().is_empty() {
@@ -52,10 +55,8 @@ impl Provider for GoogleProvider {
 
         let raw: serde_json::Value = resp.json().await?;
 
-        // Undocumented response shape: raw[0] is an array of per-sentence
-        // segments (each ["translation","source","",""]), raw[2] is the
-        // detected source language. Multi-sentence input is split across
-        // multiple segments, so all of them must be concatenated.
+        // Undocumented shape: raw[0] is per-sentence segments (["text","src","",""]),
+        // raw[2] is the detected source language.
         let translation = raw.get(0).and_then(|segments| segments.as_array()).map(|segments| {
             segments
                 .iter()
@@ -72,8 +73,8 @@ impl Provider for GoogleProvider {
             None => Ok(None),
             Some(text) if text.trim().is_empty() => Ok(None),
             Some(text) => Ok(Some(ProviderResult {
-                provider_id: "google".to_string(),
-                provider_label: "Google Translate".to_string(),
+                provider_id: self.id.clone(),
+                provider_label: self.label.clone(),
                 kind: ResultKind::Translation,
                 content: text,
                 phonetic: None,

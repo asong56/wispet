@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-// ── Config root ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub general: General,
@@ -15,9 +13,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct General {
-    /// Global shortcut to summon the main window
     pub hotkey_main: String,
-    /// Global shortcut to translate current clipboard selection
     pub hotkey: String,
     /// "light" | "dark" | "auto"
     pub theme: String,
@@ -38,22 +34,12 @@ pub struct ProviderEntry {
     pub enabled: bool,
     pub priority: u32,
     pub label: Option<String>,
-
-    // MDX-specific
     pub path: Option<String>,
-
-    // DeepL-specific
     pub api_key: Option<String>,
-
-    // DeepL / Google
     pub source_lang: Option<String>,
     pub target_lang: Option<String>,
-
-    // Wikipedia-specific
     pub lang: Option<String>,
 }
-
-// ── Defaults ──────────────────────────────────────────────────────────────────
 
 impl Default for Config {
     fn default() -> Self {
@@ -105,8 +91,6 @@ impl Default for Config {
     }
 }
 
-// ── File I/O ──────────────────────────────────────────────────────────────────
-
 pub fn config_path() -> PathBuf {
     let base = config_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("wispet").join("config.toml")
@@ -127,8 +111,7 @@ pub fn load_or_create() -> Result<Config> {
     let mut cfg: Config = toml::from_str(&raw)
         .with_context(|| "Failed to parse config.toml — check for syntax errors")?;
 
-    // Guard against empty hotkey strings, which would cause parse_shortcut to
-    // return an error ("Shortcut has no key") and crash shortcut registration.
+    // Empty hotkeys would make parse_shortcut error and crash registration.
     let defaults = Config::default();
     if cfg.general.hotkey_main.trim().is_empty() {
         log::warn!("hotkey_main is empty in config — falling back to default");

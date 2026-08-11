@@ -1,20 +1,8 @@
-/**
- * settings.js — Settings panel logic.
- * Manages: general (theme, hotkeys), provider list (enable/disable/reorder/API key).
- * All writes go through saveConfig() IPC — no partial saves.
- */
-
 import { saveConfig, getConfigPath } from './ipc.js';
 
 let _config = null;
 let _onSaved = null;
 
-// ── Public init ───────────────────────────────────────────────────────────────
-
-/**
- * @param {Config} config
- * @param {(newConfig: Config) => void} onSaved
- */
 export async function initSettings(config, onSaved) {
   _config = structuredClone(config);
   _onSaved = onSaved;
@@ -32,8 +20,6 @@ export async function initSettings(config, onSaved) {
 
   document.getElementById('settings-save-btn')?.addEventListener('click', onSave);
 }
-
-// ── Nav ───────────────────────────────────────────────────────────────────────
 
 const PANES = ['general', 'providers', 'about'];
 
@@ -67,8 +53,6 @@ function switchPane(id) {
     p.style.display = p.dataset.pane === id ? 'block' : 'none';
   });
 }
-
-// ── General pane ──────────────────────────────────────────────────────────────
 
 function renderGeneralPane() {
   const pane = document.querySelector('.settings-pane[data-pane="general"]');
@@ -142,7 +126,6 @@ function renderGeneralPane() {
       pane.querySelectorAll('.theme-switcher button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       _config.general.theme = btn.dataset.themeVal;
-      // Live preview — not saved until onSave()
       applyThemePreview(_config.general.theme);
     });
   });
@@ -168,7 +151,6 @@ function startHotkeyRecording(el) {
     if (e.metaKey)  parts.push('Super');
 
     const key = e.key;
-    // Ignore lone modifier keys
     if (['Control','Alt','Shift','Meta'].includes(key)) return;
 
     if (key === 'Escape') {
@@ -183,7 +165,7 @@ function startHotkeyRecording(el) {
     el.textContent = shortcut;
     el.classList.remove('recording');
 
-    const field = el.dataset.hotkey; // 'hotkey_main' | 'hotkey'
+    const field = el.dataset.hotkey;
     _config.general[field] = shortcut;
 
     document.removeEventListener('keydown', listener, true);
@@ -213,8 +195,6 @@ function applyThemePreview(theme) {
     document.body.setAttribute('data-theme', theme);
   }
 }
-
-// ── Providers pane ────────────────────────────────────────────────────────────
 
 function renderProvidersPane() {
   const pane = document.querySelector('.settings-pane[data-pane="providers"]');
@@ -337,7 +317,10 @@ function setupDragOnItem(item, sorted, list) {
 
     const reordered = [...sorted];
     const [moved] = reordered.splice(srcIdx, 1);
-    reordered.splice(dstIdx, 0, moved);
+    // Removing srcIdx shifts everything after it left by one, so when
+    // dragging forward the insert index needs the same correction.
+    const insertAt = srcIdx < dstIdx ? dstIdx - 1 : dstIdx;
+    reordered.splice(insertAt, 0, moved);
 
     reordered.forEach((entry, i) => {
       const realIdx = getProviderRealIndex(entry);
@@ -356,7 +339,6 @@ function getProviderRealIndex(entry) {
 
 async function addMdxDict() {
   try {
-    // Tauri v2 exposes plugin-dialog at window.__TAURI__.dialog
     const { open } = window.__TAURI__.dialog;
     const selected = await open({
       filters: [{ name: 'MDict Dictionary', extensions: ['mdx'] }],
@@ -386,8 +368,6 @@ async function addMdxDict() {
   }
 }
 
-// ── About pane ────────────────────────────────────────────────────────────────
-
 function renderAboutPane() {
   const pane = document.querySelector('.settings-pane[data-pane="about"]');
   if (!pane) return;
@@ -410,8 +390,6 @@ function renderAboutPane() {
   `;
 }
 
-// ── Save ──────────────────────────────────────────────────────────────────────
-
 async function onSave() {
   const btn = document.getElementById('settings-save-btn');
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
@@ -428,8 +406,6 @@ async function onSave() {
     if (btn) { btn.textContent = 'Error — retry'; btn.disabled = false; }
   }
 }
-
-// ── Util ──────────────────────────────────────────────────────────────────────
 
 function escapeHtml(s) {
   return String(s ?? '')

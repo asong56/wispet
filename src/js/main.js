@@ -1,19 +1,9 @@
-/**
- * main.js — Wispet main window
- *
- * View routing:  #results-view  ↔  #settings-view
- * Search:        debounced input → lookup() → renderResults()
- * Keyboard:      Esc (clear/hide), Cmd+, (settings)
- */
-
 import { lookup, getConfig, saveConfig, getConfigPath, onClipboardChange, onOpenQuery } from './ipc.js';
 import { renderResult, renderLoading } from './render.js';
 import { initSettings } from './settings.js';
 
 // Tauri v2 renamed window.getCurrent() -> getCurrentWindow()
 const { getCurrentWindow } = window.__TAURI__.window;
-
-// ── DOM refs ──────────────────────────────────────────────────────────────────
 
 const searchInput   = document.getElementById('search-input');
 const resultsView   = document.getElementById('results-view');
@@ -23,13 +13,9 @@ const btnSettings   = document.getElementById('btn-settings');
 const btnClose      = document.getElementById('btn-close');
 const clearBtn      = document.getElementById('btn-clear');
 
-// ── State ─────────────────────────────────────────────────────────────────────
-
 let currentQuery   = '';
 let debounceTimer  = null;
 let activeView     = 'results'; // 'results' | 'settings'
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
   const config = await getConfig();
@@ -64,8 +50,6 @@ async function init() {
   document.addEventListener('keydown', onGlobalKeydown);
 }
 
-// ── Search ────────────────────────────────────────────────────────────────────
-
 function onSearchInput() {
   const q = searchInput.value.trim();
   clearBtn && (clearBtn.style.display = q ? 'flex' : 'none');
@@ -87,7 +71,6 @@ function onSearchKeydown(e) {
       getCurrentWindow().hide();
     }
   }
-  // Cmd/Ctrl+, → settings
   if ((e.metaKey || e.ctrlKey) && e.key === ',') {
     e.preventDefault();
     toggleSettings();
@@ -95,7 +78,6 @@ function onSearchKeydown(e) {
 }
 
 function onGlobalKeydown(e) {
-  // Any printable character not in a form field → focus search
   if (
     activeView === 'results' &&
     e.key.length === 1 &&
@@ -130,8 +112,6 @@ function clearSearch() {
   searchInput.focus();
 }
 
-// ── Rendering ─────────────────────────────────────────────────────────────────
-
 function showEmpty() {
   resultsView.innerHTML = '';
   emptyState.style.display = 'flex';
@@ -146,7 +126,6 @@ function showResultsView() {
 
 function renderLoadingState() {
   resultsView.innerHTML = '';
-  // We don't know which providers are enabled here; show a generic spinner
   const skeleton = renderLoading('Looking up…');
   resultsView.appendChild(skeleton);
 }
@@ -188,8 +167,6 @@ function renderError(err) {
   resultsView.appendChild(sec);
 }
 
-// ── View routing ──────────────────────────────────────────────────────────────
-
 function toggleSettings() {
   if (activeView === 'settings') {
     showResultsView();
@@ -214,8 +191,6 @@ async function onConfigSaved(newConfig) {
   searchInput.focus();
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
-
 function applyTheme(theme) {
   if (theme === 'auto') {
     document.body.removeAttribute('data-theme');
@@ -224,8 +199,6 @@ function applyTheme(theme) {
   }
 }
 
-// ── Util ──────────────────────────────────────────────────────────────────────
-
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -233,7 +206,5 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
 
 init().catch(err => console.error('[Wispet] init error:', err));

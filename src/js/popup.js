@@ -1,34 +1,14 @@
-/**
- * popup.js — Selection-translate popup window.
- *
- * This window is hidden at startup and shown by Rust when the user presses
- * the selection hotkey. It receives the query via window.__wispet_query__
- * (set by Rust via win.eval()) and runs a lookup.
- *
- * Dismiss:
- *   - Esc key
- *   - Click outside (blur event)
- *   - Auto-dismiss timer (from config)
- *   - "Open in Wispet" button → shows main window with same query
- */
-
 import { lookup, getConfig, hidePopup, showMainWindow, emitOpenQuery } from './ipc.js';
 import { renderResult, renderLoading } from './render.js';
-
-// ── DOM refs ──────────────────────────────────────────────────────────────────
 
 const queryWord   = document.getElementById('popup-query-word');
 const resultsEl   = document.getElementById('popup-results');
 const closeBtn    = document.getElementById('popup-close-btn');
 const openMainBtn = document.getElementById('popup-open-main-btn');
 
-// ── State ─────────────────────────────────────────────────────────────────────
-
 let dismissTimer = null;
 let currentQuery = '';
 let dismissMs = 4000;
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
   try {
@@ -45,7 +25,7 @@ async function init() {
   });
 
   window.addEventListener('blur', () => {
-    // Delay lets a click on a button inside the popup register before it hides
+    // Delay lets a click on a button inside the popup register before it hides.
     setTimeout(dismiss, 200);
   });
 
@@ -54,13 +34,10 @@ async function init() {
     handleQuery(query);
   };
 
-  // Query may already be set if this script loads after Rust's eval() call
   if (window.__wispet_query__) {
     handleQuery(window.__wispet_query__);
   }
 }
-
-// ── Query handler ─────────────────────────────────────────────────────────────
 
 async function handleQuery(query) {
   if (!query?.trim()) return;
@@ -94,10 +71,6 @@ async function handleQuery(query) {
     for (const r of results) {
       resultsEl.appendChild(renderResult(r));
     }
-
-    // Only reset the timer if the popup is still showing the same query.
-    // If the user blurred the window while results were loading, dismiss()
-    // already cleared dismissTimer; don't restart it here.
   } catch (err) {
     if (resultsEl) {
       resultsEl.innerHTML = `
@@ -109,8 +82,6 @@ async function handleQuery(query) {
     }
   }
 }
-
-// ── Dismiss ───────────────────────────────────────────────────────────────────
 
 function dismiss() {
   clearTimeout(dismissTimer);
@@ -124,8 +95,6 @@ function resetDismissTimer() {
   }
 }
 
-// ── Open in main window ───────────────────────────────────────────────────────
-
 async function openInMain() {
   clearTimeout(dismissTimer);
   try {
@@ -137,8 +106,6 @@ async function openInMain() {
   dismiss();
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
-
 function applyTheme(theme) {
   if (theme === 'auto') {
     document.body.removeAttribute('data-theme');
@@ -147,14 +114,10 @@ function applyTheme(theme) {
   }
 }
 
-// ── Util ──────────────────────────────────────────────────────────────────────
-
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
 
 init().catch(err => console.error('[Wispet popup] init error:', err));

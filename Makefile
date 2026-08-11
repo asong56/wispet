@@ -10,9 +10,9 @@ dev:
 build:
 	cd src-tauri && cargo tauri build
 
-# Release build with optimisations (produces single binary)
+# tauri build already builds in release mode; there is no --release flag.
 release:
-	cd src-tauri && cargo tauri build --release
+	cd src-tauri && cargo tauri build
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 

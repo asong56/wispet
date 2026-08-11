@@ -6,8 +6,6 @@ pub mod google;
 pub mod mdx;
 pub mod wikipedia;
 
-// ── Result types ──────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ResultKind {
@@ -26,29 +24,21 @@ pub struct ProviderResult {
     pub kind: ResultKind,
     /// Sanitized HTML for Dict/Article, or plain UTF-8 for Translation
     pub content: String,
-    /// IPA or pronunciation hint if available
     pub phonetic: Option<String>,
-    /// Source language detected (BCP-47)
+    /// BCP-47 source language, if detected
     pub source_lang: Option<String>,
 }
-
-// ── Provider trait ────────────────────────────────────────────────────────────
 
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
     fn label(&self) -> &str;
 
-    /// Perform a lookup/translation for `query`.
-    /// Returns `None` if the provider has no result (no entry found, empty
-    /// response, etc.) and `Err` only for hard failures (network error, bad
-    /// API key, etc.).
+    /// `Ok(None)` means no result found; `Err` is a hard failure.
     async fn lookup(&self, query: &str) -> anyhow::Result<Option<ProviderResult>>;
 }
 
-// ── Dispatcher ────────────────────────────────────────────────────────────────
-
-/// Run all providers concurrently and collect results in priority order.
+/// Run all providers concurrently; join_all preserves priority order.
 pub async fn dispatch(
     providers: &[Box<dyn Provider>],
     query: &str,
@@ -69,7 +59,6 @@ pub async fn dispatch(
         })
         .collect();
 
-    // join_all preserves the original order (= priority order from config)
     join_all(futures)
         .await
         .into_iter()

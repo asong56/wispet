@@ -1,8 +1,6 @@
 use crate::{config, provider, AppState};
 use tauri::{AppHandle, Manager, State};
 
-// ── Lookup ────────────────────────────────────────────────────────────────────
-
 #[tauri::command]
 pub async fn lookup(
     query: String,
@@ -16,8 +14,6 @@ pub async fn lookup(
     let results = provider::dispatch(&providers, &query).await;
     Ok(results)
 }
-
-// ── Config ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn get_config(
@@ -41,8 +37,8 @@ pub async fn save_config(
         *providers = new_providers;
     }
 
-    // Update stored config before re-registering shortcuts so that any code
-    // reading from state during registration sees the new values.
+    // Update state before re-registering shortcuts so anything reading
+    // state during registration sees the new values.
     *state.config.lock().await = new_cfg.clone();
 
     crate::register_shortcuts(&app, &new_cfg)
@@ -51,8 +47,6 @@ pub async fn save_config(
     Ok(())
 }
 
-// ── Clipboard ─────────────────────────────────────────────────────────────────
-
 #[tauri::command]
 pub fn get_clipboard() -> String {
     use arboard::Clipboard;
@@ -60,8 +54,6 @@ pub fn get_clipboard() -> String {
         .and_then(|mut c| c.get_text())
         .unwrap_or_default()
 }
-
-// ── Window management ─────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn show_main_window(app: AppHandle) {

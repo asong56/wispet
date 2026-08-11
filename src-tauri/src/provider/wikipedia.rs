@@ -4,13 +4,17 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 pub struct WikipediaProvider {
+    id: String,
+    label: String,
     client: reqwest::Client,
     lang: String,
 }
 
 impl WikipediaProvider {
-    pub fn new(lang: String) -> Self {
+    pub fn new(id: String, label: String, lang: String) -> Self {
         WikipediaProvider {
+            id,
+            label,
             client: reqwest::Client::builder()
                 .user_agent("Wispet/0.1 (https://github.com/wispet/wispet)")
                 .build()
@@ -32,8 +36,8 @@ struct WikiSummary {
 
 #[async_trait]
 impl Provider for WikipediaProvider {
-    fn id(&self) -> &str { "wikipedia" }
-    fn label(&self) -> &str { "Wikipedia" }
+    fn id(&self) -> &str { &self.id }
+    fn label(&self) -> &str { &self.label }
 
     async fn lookup(&self, query: &str) -> Result<Option<ProviderResult>> {
         if query.trim().is_empty() {
@@ -63,7 +67,7 @@ impl Provider for WikipediaProvider {
             return Ok(None);
         }
 
-        // Prefer extract_html, fall back to wrapping plain extract in a <p>
+        // Prefer the API's own HTML extract; fall back to wrapping plain text.
         let html = data
             .extract_html
             .unwrap_or_else(|| format!("<p>{}</p>", html_escape(&data.extract)));
@@ -77,8 +81,8 @@ impl Provider for WikipediaProvider {
         );
 
         Ok(Some(ProviderResult {
-            provider_id: "wikipedia".to_string(),
-            provider_label: "Wikipedia".to_string(),
+            provider_id: self.id.clone(),
+            provider_label: self.label.clone(),
             kind: ResultKind::Article,
             content,
             phonetic: None,

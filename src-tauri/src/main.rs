@@ -15,14 +15,10 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tokio::sync::Mutex;
 
-// ── App state ─────────────────────────────────────────────────────────────────
-
 pub struct AppState {
     pub config: Mutex<config::Config>,
     pub providers: Mutex<Vec<Box<dyn Provider>>>,
 }
-
-// ── Provider builder ──────────────────────────────────────────────────────────
 
 pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
     let mut list = cfg.providers.list.clone();
@@ -50,6 +46,8 @@ pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
             "deepl" => {
                 if let Some(key) = &entry.api_key {
                     providers.push(Box::new(provider::deepl::DeeplProvider::new(
+                        id,
+                        label,
                         key.clone(),
                         entry.source_lang.clone().unwrap_or_else(|| "auto".into()),
                         entry.target_lang.clone().unwrap_or_else(|| "EN".into()),
@@ -60,12 +58,16 @@ pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
             }
             "google" => {
                 providers.push(Box::new(provider::google::GoogleProvider::new(
+                    id,
+                    label,
                     entry.source_lang.clone().unwrap_or_else(|| "auto".into()),
                     entry.target_lang.clone().unwrap_or_else(|| "zh-CN".into()),
                 )));
             }
             "wikipedia" => {
                 providers.push(Box::new(provider::wikipedia::WikipediaProvider::new(
+                    id,
+                    label,
                     entry.lang.clone().unwrap_or_else(|| "en".into()),
                 )));
             }
@@ -77,8 +79,6 @@ pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
 
     providers
 }
-
-// ── Shortcut registration ─────────────────────────────────────────────────────
 
 pub fn register_shortcuts(app: &AppHandle, cfg: &config::Config) -> Result<()> {
     let mgr = app.global_shortcut();
@@ -143,7 +143,7 @@ fn trigger_popup(app: &AppHandle) {
 }
 
 fn get_cursor_position() -> (i32, i32) {
-    // Linux: queries X11, so this returns (0, 0) under a pure-Wayland session.
+    // Returns (0, 0) under pure-Wayland sessions — X11 query only.
     use mouse_position::mouse_position::Mouse;
     match Mouse::get_mouse_position() {
         Mouse::Position { x, y } => (x, y),
@@ -198,13 +198,8 @@ fn str_to_code(s: &str) -> Result<Code> {
     Ok(code)
 }
 
-// ── wispet:// media protocol ──────────────────────────────────────────────────
 // Resolves wispet://mdd/<category>/<name> requests (rewritten from sound://
-// links by sanitize_mdx_html in provider/mdx.rs) against the loaded MDX
-// dictionaries' sibling .mdd files.
-
-/// Matches loosely on the "mdd/" marker rather than a strict scheme/host/path
-/// split, since custom-protocol URL shape varies slightly across platforms.
+// links in provider/mdx.rs) against the loaded MDX dictionaries' .mdd files.
 fn extract_wispet_resource_name(uri: &str) -> Option<String> {
     let after_mdd = uri.split("mdd/").nth(1)?;
     let raw_name = after_mdd.split('/').nth(1).unwrap_or(after_mdd);
@@ -218,9 +213,6 @@ fn extract_wispet_resource_name(uri: &str) -> Option<String> {
     )
 }
 
-/// Re-parses each candidate .mdd's key index per call rather than caching —
-/// runs off the main thread, so simple and correct beats fast here unless it
-/// becomes a bottleneck for very large dictionaries.
 fn resolve_mdd_resource(app: &AppHandle, name: &str) -> Option<Vec<u8>> {
     let state = app.state::<AppState>();
     let cfg = state.config.blocking_lock().clone();
@@ -274,8 +266,6 @@ fn wispet_not_found() -> http::Response<Vec<u8>> {
         .unwrap()
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-
 fn main() {
     env_logger::init();
 
@@ -315,10 +305,8 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // System tray
             tray::setup(&handle)?;
 
-            // Popup window (hidden, created once, reused)
             WebviewWindowBuilder::new(app, "popup", tauri::WebviewUrl::App("popup.html".into()))
                 .title("Wispet")
                 .inner_size(420.0, 480.0)
@@ -330,15 +318,12 @@ fn main() {
                 .visible(false)
                 .build()?;
 
-            // Global shortcuts
             let cfg_snap = app.state::<AppState>().config.blocking_lock().clone();
             register_shortcuts(&handle, &cfg_snap)
                 .unwrap_or_else(|e| log::error!("Shortcut registration failed: {:#}", e));
 
-            // Clipboard watcher
             clipboard::start(handle.clone());
 
-            // Forward show-popup event to the popup window
             let fwd = handle.clone();
             handle.listen("show-popup", move |event| {
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
@@ -372,7 +357,7 @@ fn main() {
             commands::get_config_path,
         ])
         .on_window_event(|window, event| {
-            // Hide main window on close instead of quitting
+            // Hide instead of quitting so the tray icon stays alive.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" || window.label() == "popup" {
                     api.prevent_close();

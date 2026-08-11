@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub struct DeeplProvider {
+    id: String,
+    label: String,
     client: reqwest::Client,
     api_key: String,
     source_lang: String,
@@ -11,8 +13,16 @@ pub struct DeeplProvider {
 }
 
 impl DeeplProvider {
-    pub fn new(api_key: String, source_lang: String, target_lang: String) -> Self {
+    pub fn new(
+        id: String,
+        label: String,
+        api_key: String,
+        source_lang: String,
+        target_lang: String,
+    ) -> Self {
         DeeplProvider {
+            id,
+            label,
             client: reqwest::Client::new(),
             api_key,
             source_lang,
@@ -54,8 +64,8 @@ struct DeeplTranslation {
 
 #[async_trait]
 impl Provider for DeeplProvider {
-    fn id(&self) -> &str { "deepl" }
-    fn label(&self) -> &str { "DeepL" }
+    fn id(&self) -> &str { &self.id }
+    fn label(&self) -> &str { &self.label }
 
     async fn lookup(&self, query: &str) -> Result<Option<ProviderResult>> {
         if query.trim().is_empty() {
@@ -98,8 +108,8 @@ impl Provider for DeeplProvider {
         match first {
             None => Ok(None),
             Some(t) => Ok(Some(ProviderResult {
-                provider_id: "deepl".to_string(),
-                provider_label: "DeepL".to_string(),
+                provider_id: self.id.clone(),
+                provider_label: self.label.clone(),
                 kind: ResultKind::Translation,
                 content: t.text,
                 phonetic: None,
