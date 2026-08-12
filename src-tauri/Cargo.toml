@@ -3,7 +3,7 @@ name = "wispet"
 version = "0.1.0"
 edition = "2021"
 description = "Wispet — lightweight dictionary & translation"
-authors = "asong56"
+authors = ["asong56"]
 
 [[bin]]
 name = "wispet"
