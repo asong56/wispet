@@ -3,7 +3,7 @@ name = "wispet"
 version = "0.1.0"
 edition = "2021"
 description = "Wispet — lightweight dictionary & translation"
-authors = ["Wispet Contributors"]
+authors = "asong56"
 
 [[bin]]
 name = "wispet"
@@ -17,7 +17,6 @@ tauri = { version = "2", features = [
   "tray-icon",
   "image-png",
   "image-ico",
-  "unstable",
   "macos-private-api",
 ] }
 tauri-plugin-global-shortcut = "2"
