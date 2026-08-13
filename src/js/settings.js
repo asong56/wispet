@@ -1,8 +1,20 @@
+/**
+ * settings.js — Settings panel logic.
+ * Manages: general (theme, hotkeys), provider list (enable/disable/reorder/API key).
+ * All writes go through saveConfig() IPC — no partial saves.
+ */
+
 import { saveConfig, getConfigPath } from './ipc.js';
 
 let _config = null;
 let _onSaved = null;
 
+// ── Public init ───────────────────────────────────────────────────────────────
+
+/**
+ * @param {Config} config
+ * @param {(newConfig: Config) => void} onSaved
+ */
 export async function initSettings(config, onSaved) {
   _config = structuredClone(config);
   _onSaved = onSaved;
@@ -20,6 +32,8 @@ export async function initSettings(config, onSaved) {
 
   document.getElementById('settings-save-btn')?.addEventListener('click', onSave);
 }
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
 
 const PANES = ['general', 'providers', 'about'];
 
@@ -53,6 +67,8 @@ function switchPane(id) {
     p.style.display = p.dataset.pane === id ? 'block' : 'none';
   });
 }
+
+// ── General pane ──────────────────────────────────────────────────────────────
 
 function renderGeneralPane() {
   const pane = document.querySelector('.settings-pane[data-pane="general"]');
@@ -126,6 +142,7 @@ function renderGeneralPane() {
       pane.querySelectorAll('.theme-switcher button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       _config.general.theme = btn.dataset.themeVal;
+      // Live preview — not saved until onSave()
       applyThemePreview(_config.general.theme);
     });
   });
@@ -151,6 +168,7 @@ function startHotkeyRecording(el) {
     if (e.metaKey)  parts.push('Super');
 
     const key = e.key;
+    // Ignore lone modifier keys
     if (['Control','Alt','Shift','Meta'].includes(key)) return;
 
     if (key === 'Escape') {
@@ -165,7 +183,7 @@ function startHotkeyRecording(el) {
     el.textContent = shortcut;
     el.classList.remove('recording');
 
-    const field = el.dataset.hotkey;
+    const field = el.dataset.hotkey; // 'hotkey_main' | 'hotkey'
     _config.general[field] = shortcut;
 
     document.removeEventListener('keydown', listener, true);
@@ -196,6 +214,8 @@ function applyThemePreview(theme) {
   }
 }
 
+// ── Providers pane ────────────────────────────────────────────────────────────
+
 function renderProvidersPane() {
   const pane = document.querySelector('.settings-pane[data-pane="providers"]');
   if (!pane) return;
@@ -224,6 +244,7 @@ const KIND_ICON_SMALL = {
   deepl: `<svg viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm89.8,96H173.89c-1.54-40.77-18.48-68.23-30.43-82.67A90.19,90.19,0,0,1,217.8,122ZM128,215.83a110,110,0,0,1-15.19-19.45A128.37,128.37,0,0,1,94.13,134h67.74a128.37,128.37,0,0,1-18.68,62.38A110,110,0,0,1,128,215.83ZM94.13,122a128.37,128.37,0,0,1,18.68-62.38A110,110,0,0,1,128,40.17a110,110,0,0,1,15.19,19.45A128.37,128.37,0,0,1,161.87,122Zm18.41-82.67c-12,14.44-28.89,41.9-30.43,82.67H38.2A90.19,90.19,0,0,1,112.54,39.33ZM38.2,134H82.11c1.54,40.77,18.48,68.23,30.43,82.67A90.19,90.19,0,0,1,38.2,134Zm105.26,82.67c11.95-14.44,28.89-41.9,30.43-82.67H217.8A90.19,90.19,0,0,1,143.46,216.67Z"/></svg>`,
   google: `<svg viewBox="0 0 256 256" fill="currentColor"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm89.8,96H173.89c-1.54-40.77-18.48-68.23-30.43-82.67A90.19,90.19,0,0,1,217.8,122ZM128,215.83a110,110,0,0,1-15.19-19.45A128.37,128.37,0,0,1,94.13,134h67.74a128.37,128.37,0,0,1-18.68,62.38A110,110,0,0,1,128,215.83ZM94.13,122a128.37,128.37,0,0,1,18.68-62.38A110,110,0,0,1,128,40.17a110,110,0,0,1,15.19,19.45A128.37,128.37,0,0,1,161.87,122Zm18.41-82.67c-12,14.44-28.89,41.9-30.43,82.67H38.2A90.19,90.19,0,0,1,112.54,39.33ZM38.2,134H82.11c1.54,40.77,18.48,68.23,30.43,82.67A90.19,90.19,0,0,1,38.2,134Zm105.26,82.67c11.95-14.44,28.89-41.9,30.43-82.67H217.8A90.19,90.19,0,0,1,143.46,216.67Z"/></svg>`,
   wikipedia: `<svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,42H40A14,14,0,0,0,26,56V200a14,14,0,0,0,14,14H216a14,14,0,0,0,14-14V56A14,14,0,0,0,216,42Zm2,158a2,2,0,0,1-2,2H40a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2H216a2,2,0,0,1,2,2ZM180,96a6,6,0,0,1-6,6H82a6,6,0,0,1,0-12h92A6,6,0,0,1,180,96Zm0,32a6,6,0,0,1-6,6H82a6,6,0,0,1,0-12h92A6,6,0,0,1,180,128Zm0,32a6,6,0,0,1-6,6H82a6,6,0,0,1,0-12h92A6,6,0,0,1,180,160Z"/></svg>`,
+  globe: `<svg viewBox="0 0 256 256" fill="currentColor"><path d="M128,22A106,106,0,1,0,234,128,106.12,106.12,0,0,0,128,22Zm88.44,90H175.7a180.53,180.53,0,0,0-16.24-60.75A94.24,94.24,0,0,1,216.44,112ZM128,222c-9.62-7.06-27.24-31.24-32.7-88h65.4C155.24,190.76,137.62,214.94,128,222Zm-32.7-100c5.46-56.76,23.08-80.94,32.7-88s27.24,31.24,32.7,88ZM96.54,51.25A180.53,180.53,0,0,0,80.3,112H39.56A94.24,94.24,0,0,1,96.54,51.25ZM39.56,134H80.3a180.53,180.53,0,0,0,16.24,60.75A94.24,94.24,0,0,1,39.56,134Zm100.2,60.75A180.53,180.53,0,0,0,175.7,134h40.74A94.24,94.24,0,0,1,159.76,194.75Z"/></svg>`,
 };
 
 function renderProviderList() {
@@ -234,8 +255,8 @@ function renderProviderList() {
   list.innerHTML = '';
 
   sorted.forEach((entry, idx) => {
-    const label = entry.label ?? entry.kind;
-    const typeLabel = { mdx: 'Local MDX', deepl: 'DeepL', google: 'Google Translate', wikipedia: 'Wikipedia' }[entry.kind] ?? entry.kind;
+    const label = entry.label ?? entry.type;
+    const typeLabel = { mdx: 'Local MDX', deepl: 'DeepL', google: 'Google Translate', wikipedia: 'Wikipedia' }[entry.type] ?? entry.type;
 
     const item = document.createElement('div');
     item.className = 'provider-item';
@@ -246,7 +267,7 @@ function renderProviderList() {
       <div class="provider-drag-handle" aria-label="Drag to reorder">
         <svg viewBox="0 0 256 256" fill="currentColor"><circle cx="96" cy="60" r="12"/><circle cx="160" cy="60" r="12"/><circle cx="96" cy="128" r="12"/><circle cx="160" cy="128" r="12"/><circle cx="96" cy="196" r="12"/><circle cx="160" cy="196" r="12"/></svg>
       </div>
-      <div class="provider-icon">${KIND_ICON_SMALL[entry.kind] ?? KIND_ICON_SMALL.globe}</div>
+      <div class="provider-icon">${KIND_ICON_SMALL[entry.type] ?? KIND_ICON_SMALL.globe}</div>
       <div class="provider-meta">
         <strong>${escapeHtml(label)}</strong>
         <small>${typeLabel}${entry.path ? ' · ' + truncatePath(entry.path) : ''}</small>
@@ -263,7 +284,7 @@ function renderProviderList() {
       if (realIdx >= 0) _config.providers.list[realIdx].enabled = e.target.checked;
     });
 
-    if (entry.kind === 'deepl') {
+    if (entry.type === 'deepl') {
       const keyRow = document.createElement('div');
       keyRow.className = 'api-key-row';
       keyRow.innerHTML = `
@@ -317,10 +338,7 @@ function setupDragOnItem(item, sorted, list) {
 
     const reordered = [...sorted];
     const [moved] = reordered.splice(srcIdx, 1);
-    // Removing srcIdx shifts everything after it left by one, so when
-    // dragging forward the insert index needs the same correction.
-    const insertAt = srcIdx < dstIdx ? dstIdx - 1 : dstIdx;
-    reordered.splice(insertAt, 0, moved);
+    reordered.splice(dstIdx, 0, moved);
 
     reordered.forEach((entry, i) => {
       const realIdx = getProviderRealIndex(entry);
@@ -333,12 +351,13 @@ function setupDragOnItem(item, sorted, list) {
 
 function getProviderRealIndex(entry) {
   return _config.providers.list.findIndex(
-    e => e.kind === entry.kind && (e.label ?? e.kind) === (entry.label ?? entry.kind) && e.path === entry.path
+    e => e.type === entry.type && (e.label ?? e.type) === (entry.label ?? entry.type) && e.path === entry.path
   );
 }
 
 async function addMdxDict() {
   try {
+    // Tauri v2 exposes plugin-dialog at window.__TAURI__.dialog
     const { open } = window.__TAURI__.dialog;
     const selected = await open({
       filters: [{ name: 'MDict Dictionary', extensions: ['mdx'] }],
@@ -351,7 +370,7 @@ async function addMdxDict() {
 
     const maxPriority = _config.providers.list.reduce((m, e) => Math.max(m, e.priority), 0);
     _config.providers.list.push({
-      kind: 'mdx',
+      type: 'mdx',
       enabled: true,
       priority: maxPriority + 1,
       label: filename,
@@ -367,6 +386,8 @@ async function addMdxDict() {
     console.error('[Wispet] add MDX error:', err);
   }
 }
+
+// ── About pane ────────────────────────────────────────────────────────────────
 
 function renderAboutPane() {
   const pane = document.querySelector('.settings-pane[data-pane="about"]');
@@ -390,6 +411,8 @@ function renderAboutPane() {
   `;
 }
 
+// ── Save ──────────────────────────────────────────────────────────────────────
+
 async function onSave() {
   const btn = document.getElementById('settings-save-btn');
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
@@ -406,6 +429,8 @@ async function onSave() {
     if (btn) { btn.textContent = 'Error — retry'; btn.disabled = false; }
   }
 }
+
+// ── Util ──────────────────────────────────────────────────────────────────────
 
 function escapeHtml(s) {
   return String(s ?? '')
