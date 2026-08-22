@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for artifacts (e.g. v3.1.0-rc1).'
+        required: true
+        default: 'v0.0.0-dryrun'
+
+permissions:
+  contents: write
+
+env:
+  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+
+jobs:
+  build:
+    name: Build (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build (Wails)
+        shell: bash
+        run: wails build -platform windows/amd64 -ldflags "-X main.Version=${{ env.VERSION }}"
+
+      - name: Package Windows
+        shell: pwsh
+        run: Compress-Archive -Path build/bin/Medict.exe -DestinationPath "Medict_${{ env.VERSION }}_Windows_x86_64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Medict_${{ env.VERSION }}_Windows_x86_64
+          path: Medict_${{ env.VERSION }}_Windows_x86_64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
+          files: assets/*.zip
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: ${{ contains(env.VERSION, '-') }}
