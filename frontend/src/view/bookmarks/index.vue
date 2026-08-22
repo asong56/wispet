@@ -88,7 +88,7 @@ import NotebookSidebar from '@/components/bookmarks/NotebookSidebar.vue';
 import { useBookmarkStore } from '@/store/bookmark';
 import { useDictQueryStore } from '@/store/dict';
 import { useRouter } from 'vue-router';
-import { ExportToAnki } from '@/apis/bookmarks-api';
+import { exportAnkiToApkg } from '@/apis/bookmark-api';
 import { useUIStore } from '@/store/ui';
 
 const store = useBookmarkStore();
@@ -136,7 +136,7 @@ async function onExportAnki() {
   if (!notebookId) { message.warning('请先选择一个生词本'); return; }
   exporting.value = true;
   try {
-    const path = await ExportToAnki(notebookId);
+    const path = await exportAnkiToApkg(notebookId);
     message.success(`已导出：${path}`);
   } catch (e) {
     message.error((e as Error)?.message || '导出失败');
