@@ -11,7 +11,13 @@ const clearBtn    = document.getElementById('btn-clear');
 
 const BASE_WIDTH = 560;
 const BAR_HEIGHT = 68;
-const MAX_HEIGHT = 560;
+
+// Golden-ratio height cap: width / φ (φ ≈ 1.618), so the window at its
+// tallest is a golden rectangle rather than an arbitrary round number.
+// Past this, #results-view scrolls (overflow-y: auto in app.css) instead
+// of the window growing further.
+const GOLDEN_RATIO = 1.6180339887;
+const MAX_HEIGHT = Math.round(BASE_WIDTH / GOLDEN_RATIO);
 
 // How far above true vertical-center the bar should sit when first shown.
 // Positive = higher up the screen.
