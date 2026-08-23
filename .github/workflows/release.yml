@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (must already exist, e.g. v0.1.0)'
+        required: true
 
 permissions:
   contents: write
@@ -66,12 +70,26 @@ jobs:
           cd dist
           find . -type f | sort | xargs sha256sum | tee ../checksums.txt
 
+      - name: Resolve release tag
+        id: tag
+        run: |
+          # On a tag push, github.ref_name is already the tag (e.g. v0.1.0).
+          # On workflow_dispatch, github.ref_name is the branch ("main"), which
+          # is not a tag and is why action-gh-release fails with "requires a
+          # tag" — the tag has to be supplied explicitly in that case.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Wispet ${{ github.ref_name }}"
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: "Wispet ${{ steps.tag.outputs.value }}"
           body: |
-            ## Wispet ${{ github.ref_name }}
+            ## Wispet ${{ steps.tag.outputs.value }}
 
             Windows x86-64 only.
 
@@ -80,7 +98,7 @@ jobs:
             dist/**/*
             checksums.txt
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(steps.tag.outputs.value, '-') }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
