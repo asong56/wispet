@@ -1,0 +1,296 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Wispet — App styles
+   All colors via ACDN CSS variables. No magic numbers.
+   Single Spotlight-style window: fixed-width search bar that grows
+   downward to fit results. No settings view, no second window.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Window chrome ──────────────────────────────────────────────────────────── */
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Tauri transparent window base */
+  background: transparent;
+}
+
+#app {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: modal-in var(--dur-normal) var(--ease-out) both;
+}
+
+/* ── Drag region (titlebar area) ────────────────────────────────────────────── */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* ── Search header ──────────────────────────────────────────────────────────── */
+header.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 16px;
+  height: 68px;
+  flex-shrink: 0;
+}
+
+header.search-bar svg.search-icon {
+  width: 20px;
+  height: 20px;
+  fill: var(--color-text-muted);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+header.search-bar input[type="search"] {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans), var(--font-cjk);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  color: var(--color-text);
+  outline: none;
+  padding: 0;
+  min-width: 0;
+  /* Remove browser search input chrome */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+header.search-bar input[type="search"]::-webkit-search-cancel-button,
+header.search-bar input[type="search"]::-webkit-search-decoration {
+  display: none;
+}
+
+header.search-bar input[type="search"]::placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-base);
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .icon-btn {
+    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+}
+
+.icon-btn:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.icon-btn:active { transform: scale(0.92); }
+
+/* ── Results view ───────────────────────────────────────────────────────────── */
+#results-view {
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--color-border);
+}
+
+#results-view::-webkit-scrollbar { width: 4px; }
+#results-view::-webkit-scrollbar-track { background: transparent; }
+#results-view::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+/* ── Empty / welcome state ──────────────────────────────────────────────────── */
+#empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  padding: 0 24px 20px;
+  user-select: none;
+}
+
+#empty-state svg {
+  display: none;
+}
+
+#empty-state p { margin: 0; }
+
+/* ── Provider result section ────────────────────────────────────────────────── */
+section.result {
+  padding: 14px 20px 16px;
+  border-bottom: 1px solid var(--color-border);
+  animation: fade-up var(--dur-normal) var(--ease-out) both;
+}
+
+section.result:last-child {
+  border-bottom: none;
+}
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.provider-header svg {
+  width: 13px;
+  height: 13px;
+  fill: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.provider-name {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.provider-name.error-text {
+  color: var(--color-text-muted);
+}
+
+.phonetic {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+/* Copy button inside result header */
+button.copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: auto;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  border: none;
+  opacity: 0;
+}
+
+section.result:hover button.copy-btn { opacity: 1; }
+
+button.copy-btn svg { width: 12px; height: 12px; fill: currentColor; }
+
+@media (prefers-reduced-motion: no-preference) {
+  button.copy-btn { transition: opacity var(--dur-fast) var(--ease-out); }
+}
+
+/* ── Dictionary HTML content area ───────────────────────────────────────────── */
+.dict-content {
+  font-size: var(--text-sm);
+  line-height: 1.75;
+  color: var(--color-text);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  margin: 0;
+}
+
+.no-result-text {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Sanitize MDX HTML to ACDN aesthetics */
+.dict-content * { max-width: 100%; }
+.dict-content a { color: var(--color-accent); text-decoration-color: var(--color-accent-dim); }
+.dict-content b, .dict-content strong { font-weight: 600; }
+.dict-content em, .dict-content i { font-style: italic; color: var(--color-text-muted); }
+.dict-content hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 8px 0;
+}
+
+/* ── Translation content area ───────────────────────────────────────────────── */
+.translation-content {
+  font-size: var(--text-base);
+  font-weight: 400;
+  line-height: 1.65;
+  color: var(--color-text);
+}
+
+/* ── Wikipedia article ──────────────────────────────────────────────────────── */
+.article-content {
+  font-size: var(--text-sm);
+  line-height: 1.75;
+  color: var(--color-text);
+}
+
+.article-content p { margin: 0 0 8px; }
+.article-content p:last-child { margin-bottom: 0; }
+
+.wiki-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+  margin: 0 0 8px !important;
+}
+
+/* ── Provider loading skeleton ──────────────────────────────────────────────── */
+section.result-loading {
+  padding: 14px 20px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loading-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-border);
+  animation: pulse-opacity 1.2s ease-in-out infinite;
+}
+.loading-dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+.loading-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+}

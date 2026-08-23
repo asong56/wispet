@@ -1,0 +1,38 @@
+# Wispet configuration
+#
+# This is the ONLY place Wispet is configured — there is no in-app settings
+# UI. Edit this file, then restart Wispet for changes to take effect (config
+# is read once at startup). On first launch, Wispet copies a file like this
+# to your config directory as wispet.toml if one doesn't exist yet — edit
+# that copy, not this one, for a real installation.
+
+[general]
+hotkey_main = "Ctrl+Alt+Space"   # opens the search box
+                                  # hotkey syntax: Modifier+Key, e.g. "Ctrl+Shift+W"
+
+[providers]
+
+# ── Local MDX dictionary ─────────────────────────────────────────────────────
+# Set 'path' to your vocabulary.com.mdx file. Providers are tried in
+# `priority` order (lowest first); add more [[providers.list]] blocks for
+# additional dictionaries.
+
+[[providers.list]]
+type     = "mdx"
+enabled  = true
+priority = 1
+label    = "Vocabulary.com"
+path     = "vocabulary.com.mdx"   # change this to the real path on your machine
+
+# ── DeepL (optional) ─────────────────────────────────────────────────────────
+# Uncomment and add your API key to enable. Free tier keys end in ":fx".
+# Sign up at https://www.deepl.com/pro-api
+
+# [[providers.list]]
+# type        = "deepl"
+# enabled     = true
+# priority    = 2
+# label       = "DeepL"
+# api_key     = ""
+# source_lang = "auto"
+# target_lang = "ZH"
