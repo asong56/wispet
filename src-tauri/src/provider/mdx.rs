@@ -18,6 +18,25 @@ const RECORD_BLOCK_COMP_NONE: u32 = 0x00000000;
 const RECORD_BLOCK_COMP_LZO: u32 = 0x01000000;
 const RECORD_BLOCK_COMP_ZLIB: u32 = 0x02000000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextEncoding {
+    Utf8,
+    Utf16Le,
+}
+
+impl TextEncoding {
+    /// Bytes per "basic unit" as used for first_size/last_size lengths in
+    /// the key-index, and for word-length accounting elsewhere: 1 for
+    /// UTF-8 (and legacy GBK/Big5, which this parser does not otherwise
+    /// support), 2 for UTF-16LE.
+    fn unit_bytes(self) -> usize {
+        match self {
+            TextEncoding::Utf8 => 1,
+            TextEncoding::Utf16Le => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct KeyEntry {
     headword_lower: String,
@@ -164,6 +183,28 @@ fn parse_mdx(
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
 
+    // The key-index's first_word/last_word lengths, and every headword
+    // inside the key blocks, are counted in "basic units" of whatever
+    // `Encoding` the header declares — 1 byte per unit for UTF-8 (which
+    // real-world dictionaries like vocabulary.com's actually use), 2 bytes
+    // per unit for UTF-16. Hardcoding UTF-16's *2 here was a second,
+    // independent bug from the RC4/RIPEMD128 cipher mixup: even with the
+    // cipher fixed, a UTF-8 dictionary would desync on the very first key
+    // block's first_word/last_word span and either bail out on a bounds
+    // check or silently read garbage comp_size/decomp_size for every block
+    // after it. GBK/Big5 are not implemented (both are legacy v1.2-era
+    // encodings) and are treated as 1-byte units, same as UTF-8, since at
+    // least the span arithmetic stays correct even though the resulting
+    // headword text would still be wrong for genuinely GBK/Big5 content.
+    let text_encoding = match parse_header_attr(&header_str, "Encoding")
+        .unwrap_or_default()
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "UTF-16" | "UTF16" => TextEncoding::Utf16Le,
+        _ => TextEncoding::Utf8, // "UTF-8", "", "GBK", "BIG5"
+    };
+
     // MDX v2 uses 8-byte counts
     let num_blocks = read_u64_be(reader)?;
     let _num_entries = read_u64_be(reader)?;
@@ -179,14 +220,16 @@ fn parse_mdx(
 
     // When Encrypted has bit 0x02 set, the key-block-info section (the
     // block that parse_key_block_info reads below — num_entries per block,
-    // first/last headword, comp/decomp sizes) is RC4-encrypted with a key
-    // derived from the block's own Adler-32 checksum. Everything else
-    // (the key blocks themselves, record blocks) is untouched. Without
-    // this decryption step, comp_sz/decomp_sz below are read out of
-    // ciphertext and come out as effectively random u64s, which is what
-    // was actually causing the "corrupt / EOF" failures on top of the
-    // header_len bug — LDOCE-family and vocabulary.com dictionaries both
-    // commonly set Encrypted="2".
+    // first/last headword, comp/decomp sizes) is encrypted with the
+    // MDict keyword-index-encryption scheme (RIPEMD-128-derived key, a
+    // custom nibble-swap/XOR/chained cipher — see decrypt_key_block_info's
+    // doc comment; it is NOT RC4, despite that being a common assumption).
+    // Everything else (the key blocks themselves, record blocks) is
+    // untouched. Without this decryption step, comp_sz/decomp_sz below are
+    // read out of ciphertext and come out as effectively random u64s,
+    // which is what was actually causing the "corrupt / EOF" failures on
+    // top of the header_len bug — LDOCE-family and vocabulary.com
+    // dictionaries both commonly set Encrypted="2".
     let key_index_decomp = if encrypted & 0x02 != 0 {
         let decrypted = decrypt_key_block_info(&key_index_comp)?;
         decompress_block(&decrypted, key_index_decomp_size)?
@@ -194,7 +237,7 @@ fn parse_mdx(
         decompress_block(&key_index_comp, key_index_decomp_size)?
     };
 
-    let key_block_sizes = parse_key_block_info(&key_index_decomp, num_blocks)?;
+    let key_block_sizes = parse_key_block_info(&key_index_decomp, num_blocks, text_encoding)?;
 
     let mut index: Vec<KeyEntry> = Vec::new();
     {
@@ -204,7 +247,7 @@ fn parse_mdx(
             let mut comp = vec![0u8; comp_len];
             reader.read_exact(&mut comp)?;
             let decomp = decompress_block(&comp, *decomp_sz)?;
-            parse_key_block(&decomp, &mut index)?;
+            parse_key_block(&decomp, &mut index, text_encoding)?;
         }
         let consumed = reader.stream_position()? - key_blocks_start;
         if consumed != key_blocks_total_size {
@@ -304,7 +347,12 @@ fn mdict_keyword_index_decrypt_in_place(key: &[u8], data: &mut [u8]) {
     }
 }
 
-fn parse_key_block_info(data: &[u8], num_blocks: u64) -> Result<Vec<(u64, u64)>> {
+fn parse_key_block_info(
+    data: &[u8],
+    num_blocks: u64,
+    text_encoding: TextEncoding,
+) -> Result<Vec<(u64, u64)>> {
+    let unit = text_encoding.unit_bytes();
     let num_blocks = checked_len("num_blocks", num_blocks)?;
     let mut sizes: Vec<(u64, u64)> = Vec::with_capacity(num_blocks);
     let mut pos = 0usize;
@@ -325,7 +373,9 @@ fn parse_key_block_info(data: &[u8], num_blocks: u64) -> Result<Vec<(u64, u64)>>
         }
         let first_sz = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
         pos += 2;
-        let first_span = (first_sz + 1) * 2;
+        // (length + 1) basic units: +1 accounts for the trailing NUL
+        // terminator, in the same unit width as the word itself.
+        let first_span = (first_sz + 1) * unit;
         if pos + first_span > data.len() {
             bail!(
                 "MDX key block info: first_word span ({} bytes at offset {}) exceeds section \
@@ -341,7 +391,7 @@ fn parse_key_block_info(data: &[u8], num_blocks: u64) -> Result<Vec<(u64, u64)>>
         }
         let last_sz = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
         pos += 2;
-        let last_span = (last_sz + 1) * 2;
+        let last_span = (last_sz + 1) * unit;
         if pos + last_span > data.len() {
             bail!(
                 "MDX key block info: last_word span ({} bytes at offset {}) exceeds section \
@@ -364,7 +414,11 @@ fn parse_key_block_info(data: &[u8], num_blocks: u64) -> Result<Vec<(u64, u64)>>
     Ok(sizes)
 }
 
-fn parse_key_block(data: &[u8], index: &mut Vec<KeyEntry>) -> Result<()> {
+fn parse_key_block(
+    data: &[u8],
+    index: &mut Vec<KeyEntry>,
+    text_encoding: TextEncoding,
+) -> Result<()> {
     let mut pos = 0usize;
 
     while pos < data.len() {
@@ -372,15 +426,29 @@ fn parse_key_block(data: &[u8], index: &mut Vec<KeyEntry>) -> Result<()> {
         let record_offset = u64::from_be_bytes(data[pos..pos+8].try_into()?);
         pos += 8;
 
-        let mut chars: Vec<u16> = Vec::new();
-        while pos + 2 <= data.len() {
-            let ch = u16::from_le_bytes([data[pos], data[pos+1]]);
-            pos += 2;
-            if ch == 0 { break; }
-            chars.push(ch);
-        }
-
-        let headword = String::from_utf16_lossy(&chars).to_string();
+        let headword = match text_encoding {
+            TextEncoding::Utf16Le => {
+                let mut chars: Vec<u16> = Vec::new();
+                while pos + 2 <= data.len() {
+                    let ch = u16::from_le_bytes([data[pos], data[pos + 1]]);
+                    pos += 2;
+                    if ch == 0 { break; }
+                    chars.push(ch);
+                }
+                String::from_utf16_lossy(&chars)
+            }
+            TextEncoding::Utf8 => {
+                let start = pos;
+                while pos < data.len() && data[pos] != 0 {
+                    pos += 1;
+                }
+                let word = String::from_utf8_lossy(&data[start..pos]).into_owned();
+                if pos < data.len() {
+                    pos += 1; // consume the NUL terminator
+                }
+                word
+            }
+        };
 
         index.push(KeyEntry {
             headword_lower: headword.to_lowercase(),
@@ -649,10 +717,17 @@ mod tests {
         out.extend_from_slice(&[0u8; 4]);
 
         // --- build one key block containing one entry ---
+        // Header declares Encoding="UTF-8" above, so headwords in the key
+        // block and key-block-info must actually be UTF-8 to match — using
+        // UTF-16 here (as an earlier version of this fixture did) would
+        // silently test a combination no real UTF-8 dictionary produces,
+        // while happening to "pass" only because the parser had the same
+        // UTF-16 assumption hardcoded on the read side.
+        let headword_utf8 = headword.as_bytes();
         let mut key_block_plain = Vec::new();
         key_block_plain.extend_from_slice(&0u64.to_be_bytes()); // record_offset = 0
-        key_block_plain.extend(headword.encode_utf16().flat_map(|u| u.to_le_bytes()));
-        key_block_plain.extend_from_slice(&0u16.to_le_bytes()); // NUL terminator
+        key_block_plain.extend_from_slice(headword_utf8);
+        key_block_plain.push(0u8); // NUL terminator
 
         let key_block_comp = zlib_compress(&key_block_plain);
         let mut key_block_wrapped = Vec::new();
@@ -661,19 +736,16 @@ mod tests {
         key_block_wrapped.extend_from_slice(&key_block_comp);
 
         // --- build key-block-info describing that one block ---
-        let first_word_u16: Vec<u16> = headword.encode_utf16().collect();
+        // first_size/last_size are counted in "basic units" for Encoding —
+        // 1 byte per unit for UTF-8 — matching TextEncoding::unit_bytes().
         let mut kbi_plain = Vec::new();
         kbi_plain.extend_from_slice(&1u64.to_be_bytes()); // num_entries in this block
-        kbi_plain.extend_from_slice(&(first_word_u16.len() as u16).to_be_bytes());
-        for u in &first_word_u16 {
-            kbi_plain.extend_from_slice(&u.to_le_bytes());
-        }
-        kbi_plain.extend_from_slice(&0u16.to_le_bytes()); // NUL after first_word
-        kbi_plain.extend_from_slice(&(first_word_u16.len() as u16).to_be_bytes());
-        for u in &first_word_u16 {
-            kbi_plain.extend_from_slice(&u.to_le_bytes());
-        }
-        kbi_plain.extend_from_slice(&0u16.to_le_bytes()); // NUL after last_word
+        kbi_plain.extend_from_slice(&(headword_utf8.len() as u16).to_be_bytes());
+        kbi_plain.extend_from_slice(headword_utf8);
+        kbi_plain.push(0u8); // NUL after first_word
+        kbi_plain.extend_from_slice(&(headword_utf8.len() as u16).to_be_bytes());
+        kbi_plain.extend_from_slice(headword_utf8);
+        kbi_plain.push(0u8); // NUL after last_word
         kbi_plain.extend_from_slice(&(key_block_wrapped.len() as u64).to_be_bytes()); // comp_size
         kbi_plain.extend_from_slice(&(key_block_plain.len() as u64).to_be_bytes()); // decomp_size
 
@@ -806,6 +878,20 @@ mod tests {
         let dict = parse_via_tempfile(&bytes).unwrap();
         assert!(dict.lookup_exact("HELLO").unwrap().is_some());
         assert!(dict.lookup_exact("goodbye").unwrap().is_none());
+    }
+
+    #[test]
+    fn parses_multibyte_utf8_headword() {
+        // A non-ASCII headword (café — the é is 2 bytes in UTF-8) exercises
+        // the UTF-8 byte-length accounting in parse_key_block_info's
+        // first_span/last_span math, which is a different code path than
+        // pure-ASCII "hello" (still 1 unit_bytes() per char, but this
+        // catches any accidental char-count-vs-byte-count confusion since
+        // "café".chars().count() == 4 but "café".len() == 5).
+        let bytes = build_synthetic_mdx(true, "café", "<b>coffee</b>");
+        let dict = parse_via_tempfile(&bytes).expect("UTF-8 multibyte headword should parse");
+        let html = dict.lookup_exact("café").unwrap();
+        assert_eq!(html.as_deref(), Some("<b>coffee</b>"));
     }
 
     #[test]
