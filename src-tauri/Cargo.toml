@@ -38,6 +38,7 @@ urlencoding = "2"
 regex-lite = "0.1"
 http = "1"
 md-5 = "0.10"
+ripemd = "0.1"
 
 [profile.release]
 opt-level = "z"
