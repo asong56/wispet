@@ -16,6 +16,7 @@ html, body {
 
 #app {
   width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
@@ -25,6 +26,15 @@ html, body {
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+}
+
+/* Entrance animation plays once, on first mount, via a class toggled in
+   JS — NOT as a plain `animation` property. A plain animation on #app
+   re-triggers relayout/repaint every time the element's own size changes
+   (which is constantly, since resizeToFit() reads #app's scrollHeight on
+   every keystroke), causing the transform to fight the window resize and
+   visibly tear/clip the search bar mid-frame. */
+#app.entering {
   animation: modal-in var(--dur-normal) var(--ease-out) both;
 }
 
