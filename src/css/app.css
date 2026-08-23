@@ -15,16 +15,28 @@ html, body {
 }
 
 #app {
-  /* Deliberately NO height here (fixed once by mistake in an earlier pass
-     to fix a resize-timing race — that broke results rendering instead:
-     with height:100% here, #app's height is clamped to the *window's
-     current* size, which resizeToFit() below reads via scrollHeight to
-     decide the *next* window size — a circular dependency that pins the
-     window at whatever size it already was, silently clipping any result
-     content taller than the search bar alone, invisible but present in
-     the DOM). #app must size itself to its own content so scrollHeight
-     reports the height the window actually needs to grow to. */
+  /* Deliberately NO fixed `height` here (fixed once by mistake in an
+     earlier pass to fix a resize-timing race — that broke results
+     rendering instead: with height:100% here, #app's height is clamped to
+     the *window's current* size, which resizeToFit() below reads via
+     scrollHeight to decide the *next* window size — a circular dependency
+     that pins the window at whatever size it already was, silently
+     clipping any result content taller than the search bar alone,
+     invisible but present in the DOM). #app must be free to size itself
+     to its own content so scrollHeight reports the height the window
+     actually needs to grow to.
+
+     `max-height` (not `height`) is used below to enforce the same golden-
+     ratio cap main.js uses for MAX_HEIGHT. Unlike `height`, max-height
+     only kicks in once content exceeds it — it doesn't interfere with
+     scrollHeight measurement for shorter content, and it stops #app from
+     growing past the window once the window itself has stopped growing
+     (window growth is capped at MAX_HEIGHT in resizeToFit()). Once
+     capped, #app can no longer expand, so the overflow has to go
+     somewhere — that's #results-view below, which is the flex child made
+     to shrink and become the actual internal scroll container. */
   width: 100%;
+  max-height: 346px; /* keep in sync with MAX_HEIGHT in js/main.js (BASE_WIDTH / φ) */
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
@@ -138,6 +150,17 @@ header.search-bar input[type="search"]::placeholder {
 
 /* ── Results view ───────────────────────────────────────────────────────────── */
 #results-view {
+  /* min-height: 0 is the key line: without it, a flex child's default
+     min-height is `auto`, which means "at least as tall as my content" —
+     that forces #app (the flex container) to keep growing to fit
+     #results-view even after #app has hit max-height above, so the excess
+     still had nowhere to scroll and just got clipped at #app's boundary.
+     With min-height: 0, #results-view is allowed to shrink below its
+     content's natural height once #app runs out of room, so it becomes a
+     bounded box and overflow-y: auto below actually gets a chance to
+     activate — the scrollbar the golden-ratio cap was supposed to hand
+     off to. */
+  min-height: 0;
   overflow-y: auto;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
