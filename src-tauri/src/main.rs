@@ -95,13 +95,37 @@ pub fn register_shortcuts(app: &AppHandle, cfg: &config::Config) -> Result<()> {
     Ok(())
 }
 
-/// Shows the single query window, centered on screen, and emits
-/// `wispet-query` (always empty — there is no clipboard/selection lookup
-/// path) so the frontend clears and focuses the input.
+/// Vertical offset (logical px) above true screen-center where the bar sits.
+/// Kept in sync with VERTICAL_OFFSET in src/js/main.js.
+const VERTICAL_OFFSET: f64 = 120.0;
+
+/// Shows the single query window, positioned slightly above screen-center,
+/// and emits `wispet-query` (always empty — there is no clipboard/selection
+/// lookup path) so the frontend clears and focuses the input.
+///
+/// We don't use `center()` here: the frontend re-anchors the window itself
+/// on every resize as results grow/shrink (see resizeToFit() in main.js),
+/// so centering here only needs to happen once per show, at the same
+/// above-center offset the frontend uses, so the window doesn't jump when
+/// JS re-asserts its own anchor a frame later.
 pub fn show_query_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else { return };
 
-    let _ = win.center();
+    if let (Ok(Some(monitor)), Ok(size)) = (win.current_monitor(), win.outer_size()) {
+        let scale = monitor.scale_factor();
+        let screen_h = monitor.size().height as f64 / scale;
+        let win_w = size.width as f64 / scale;
+        let win_h = size.height as f64 / scale;
+        let screen_w = monitor.size().width as f64 / scale;
+
+        let x = ((screen_w - win_w) / 2.0).max(0.0);
+        let y = ((screen_h - win_h) / 2.0 - VERTICAL_OFFSET).max(24.0);
+
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    } else {
+        let _ = win.center();
+    }
+
     let _ = win.show();
     let _ = win.set_focus();
     let _ = app.emit("wispet-query", "");
