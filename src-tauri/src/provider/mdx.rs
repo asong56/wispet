@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use encoding_rs::UTF_16LE;
 use flate2::read::ZlibDecoder;
-use md5::{Digest, Md5};
+use ripemd::{Digest, Ripemd128};
 use std::{
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom},
@@ -240,15 +240,31 @@ fn parse_mdx(
     Ok((index, record_blocks, record_section_offset))
 }
 
-/// Decrypts an MDX key-block-info section (Encrypted="2"). This is the
-/// standard MDict scheme: the first 4 bytes of the block are its own
-/// Adler-32 checksum (already present in `data`, not stripped here — the
-/// caller/decompress_block expects it to remain); the RC4 key is
-/// MD5(checksum_bytes ++ fixed_salt), and everything from byte 8 onward
-/// is RC4-encrypted. Bytes 4..8 (a second copy of the checksum used only
-/// as part of key derivation) are left in place in the output since
-/// decompress_block re-reads bytes 0..8 as its own comp-type/checksum
-/// header regardless of what's underneath.
+/// Decrypts an MDX key-block-info section (Encrypted has bit 0x02 set, i.e.
+/// `Encrypted & 2 != 0`).
+///
+/// Per the MDict format spec (zhansliu/writemdict fileformat.md, "Keyword
+/// index encryption"): the key-block-info's `comp_type` and `checksum`
+/// header (bytes 0..8 of the compressed section) are left untouched; only
+/// the `compressed_data` that follows (byte 8 onward) is encrypted, via:
+///
+///   key = ripemd128(checksum_bytes ++ "\x95\x36\x00\x00")
+///   for i, byte in enumerate(compressed_data):
+///       byte = SWAPNIBBLE(byte ^ i ^ key[i % keylen] ^ previous)
+///       previous = byte  (the *encrypted* output byte, not the input)
+///
+/// This is NOT RC4 — an earlier version of this function used RC4 keyed
+/// with MD5, which is wrong on two independent counts (wrong cipher, wrong
+/// hash) and reliably produces garbage bytes that zlib then rejects with
+/// "corrupt deflate stream". SWAPNIBBLE swaps the high/low nibbles of a
+/// byte: ((b >> 4) | (b << 4)) & 0xFF.
+///
+/// Decryption is this cipher's own exact inverse, run in reverse order per
+/// byte (since `previous` depends on the *ciphertext* byte, which is now
+/// the input rather than the output):
+///
+///   plain_byte = SWAPNIBBLE(cipher_byte) ^ i ^ key[i % keylen] ^ previous
+///   previous = cipher_byte
 fn decrypt_key_block_info(data: &[u8]) -> Result<Vec<u8>> {
     if data.len() < 8 {
         bail!(
@@ -257,36 +273,34 @@ fn decrypt_key_block_info(data: &[u8]) -> Result<Vec<u8>> {
         );
     }
 
-    // Per the MDict format: RC4 key = MD5(checksum_bytes[4] ++ [0x95, 0x36, 0x00, 0x00])
+    // checksum_bytes is the 4-byte ADLER32 checksum stored at data[4..8]
+    // (bytes 0..4 are comp_type, bytes 4..8 are the checksum — see the
+    // "Compression" section of the format spec).
     let mut key_material = [0u8; 8];
     key_material[0..4].copy_from_slice(&data[4..8]);
     key_material[4..8].copy_from_slice(&[0x95, 0x36, 0x00, 0x00]);
-    let key = Md5::digest(key_material);
+    let key = Ripemd128::digest(key_material);
 
     let mut out = data.to_vec();
-    rc4_decrypt_in_place(&key, &mut out[8..]);
+    mdict_keyword_index_decrypt_in_place(&key, &mut out[8..]);
     Ok(out)
 }
 
-/// Minimal RC4 stream cipher, used only for the MDict key-block-info
-/// decryption above. Not intended for any other purpose.
-fn rc4_decrypt_in_place(key: &[u8], data: &mut [u8]) {
-    let mut s: [u8; 256] = [0; 256];
-    for (i, b) in s.iter_mut().enumerate() {
-        *b = i as u8;
+/// Inverse of the MDict keyword-index-encryption byte cipher described
+/// above. `key` is typically 16 bytes (RIPEMD-128 output) but any nonzero
+/// length is handled via `i % key.len()`, matching the reference `keylen`
+/// modulus in the spec's C implementation.
+fn mdict_keyword_index_decrypt_in_place(key: &[u8], data: &mut [u8]) {
+    if key.is_empty() {
+        return;
     }
-    let mut j: u8 = 0;
-    for i in 0..256 {
-        j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
-        s.swap(i, j as usize);
-    }
-    let (mut i, mut j) = (0u8, 0u8);
-    for byte in data.iter_mut() {
-        i = i.wrapping_add(1);
-        j = j.wrapping_add(s[i as usize]);
-        s.swap(i as usize, j as usize);
-        let k = s[(s[i as usize].wrapping_add(s[j as usize])) as usize];
-        *byte ^= k;
+    let mut previous: u8 = 0x36;
+    for (i, byte) in data.iter_mut().enumerate() {
+        let cipher_byte = *byte;
+        let swapped = (cipher_byte >> 4) | (cipher_byte << 4);
+        let plain = swapped ^ (i as u8) ^ key[i % key.len()] ^ previous;
+        previous = cipher_byte;
+        *byte = plain;
     }
 }
 
@@ -724,16 +738,27 @@ mod tests {
         encoder.finish().unwrap()
     }
 
-    /// Test-side mirror of decrypt_key_block_info's inverse: RC4 is
-    /// symmetric, so encrypting for the test fixture uses the exact same
-    /// key derivation and cipher as production decryption.
+    /// Test-side encryptor matching the real MDict keyword-index-encryption
+    /// scheme (see decrypt_key_block_info's doc comment for the full
+    /// derivation). Unlike RC4, this cipher is NOT symmetric — encryption
+    /// and decryption use different formulas, because `previous` chains
+    /// off the *ciphertext* byte in both directions, so this is a distinct
+    /// forward pass, not a call to the decrypt function.
     fn encrypt_key_block_info_for_test(data: &[u8]) -> Vec<u8> {
         let mut key_material = [0u8; 8];
         key_material[0..4].copy_from_slice(&data[4..8]);
         key_material[4..8].copy_from_slice(&[0x95, 0x36, 0x00, 0x00]);
-        let key = Md5::digest(key_material);
+        let key = Ripemd128::digest(key_material);
+
         let mut out = data.to_vec();
-        rc4_decrypt_in_place(&key, &mut out[8..]); // RC4 is its own inverse
+        let mut previous: u8 = 0x36;
+        for (i, byte) in out[8..].iter_mut().enumerate() {
+            let plain_byte = *byte;
+            let x = plain_byte ^ (i as u8) ^ key[i % key.len()] ^ previous;
+            let cipher_byte = (x >> 4) | (x << 4); // SWAPNIBBLE
+            previous = cipher_byte;
+            *byte = cipher_byte;
+        }
         out
     }
 
