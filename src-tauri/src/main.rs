@@ -17,10 +17,21 @@ pub struct AppState {
 }
 
 pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
+    build_providers_reporting(cfg).0
+}
+
+/// Same as build_providers, but also returns a human-readable line for
+/// every provider entry that failed to load — e.g. an MDX file that's
+/// missing, unreadable, or fails to parse. build_providers() previously
+/// only `log::error!`'d these, which is invisible in a windowed release
+/// build with no attached console: the app would just silently return
+/// zero results for every query with no signal as to why.
+pub fn build_providers_reporting(cfg: &config::Config) -> (Vec<Box<dyn Provider>>, Vec<String>) {
     let mut list = cfg.providers.list.clone();
     list.sort_by_key(|p| p.priority);
 
     let mut providers: Vec<Box<dyn Provider>> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
 
     for (i, entry) in list.iter().enumerate() {
         if !entry.enabled {
@@ -35,8 +46,16 @@ pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
                 if let Some(path) = &entry.path {
                     match provider::mdx::MdxProvider::new(path, label.clone(), id) {
                         Ok(p) => providers.push(Box::new(p)),
-                        Err(e) => log::error!("Failed to load MDX dict at {}: {:#}", path, e),
+                        Err(e) => {
+                            let msg = format!("MDX provider \"{}\" ({}): {:#}", label, path, e);
+                            log::error!("{}", msg);
+                            errors.push(msg);
+                        }
                     }
+                } else {
+                    let msg = format!("MDX provider \"{}\" has no path configured — skipping", label);
+                    log::warn!("{}", msg);
+                    errors.push(msg);
                 }
             }
             "deepl" => {
@@ -68,12 +87,60 @@ pub fn build_providers(cfg: &config::Config) -> Vec<Box<dyn Provider>> {
                 )));
             }
             other => {
-                log::warn!("Unknown provider type '{}' — skipping", other);
+                let msg = format!("Unknown provider type '{}' — skipping", other);
+                log::warn!("{}", msg);
+                errors.push(msg);
             }
         }
     }
 
-    providers
+    if providers.is_empty() {
+        let msg = "No providers loaded — every lookup will return \"no result\". \
+                    Check the paths/settings in config.toml.".to_string();
+        log::error!("{}", msg);
+        errors.push(msg);
+    }
+
+    (providers, errors)
+}
+
+/// Writes provider-load errors to wispet-startup.log next to config.toml,
+/// so a user running the packaged app (no console attached) has somewhere
+/// to actually look when lookups mysteriously return nothing. Overwrites
+/// on every launch — this is a diagnostic snapshot, not an accumulating log.
+fn write_startup_log(errors: &[String]) {
+    let path = config::config_path();
+    let log_path = path.with_file_name("wispet-startup.log");
+
+    let contents = if errors.is_empty() {
+        format!(
+            "Wispet startup at {}\nAll configured providers loaded successfully.\n",
+            chrono_now()
+        )
+    } else {
+        let mut s = format!("Wispet startup at {}\n", chrono_now());
+        s.push_str(&format!("{} problem(s) found:\n\n", errors.len()));
+        for e in errors {
+            s.push_str("- ");
+            s.push_str(e);
+            s.push('\n');
+        }
+        s
+    };
+
+    if let Err(e) = std::fs::write(&log_path, contents) {
+        log::warn!("Could not write startup log to {}: {:#}", log_path.display(), e);
+    }
+}
+
+fn chrono_now() -> String {
+    // Avoid pulling in a chrono dependency just for a timestamp in a
+    // diagnostic file — std's SystemTime is enough here.
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => format!("unix_ts={}", d.as_secs()),
+        Err(_) => "unknown time".to_string(),
+    }
 }
 
 pub fn register_shortcuts(app: &AppHandle, cfg: &config::Config) -> Result<()> {
@@ -247,14 +314,23 @@ fn wispet_not_found() -> http::Response<Vec<u8>> {
 }
 
 fn main() {
-    env_logger::init();
+    // env_logger::init() alone only prints when RUST_LOG is set, and even
+    // then goes to stderr — invisible for a windows_subsystem="windows"
+    // release build launched from an icon/tray rather than a console. Give
+    // it a default filter so warn/error always show, AND also duplicate
+    // startup diagnostics (in particular provider load failures) into a
+    // log file next to config.toml, since that's the only place a user
+    // running the built app can actually go look.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .init();
 
     let cfg = config::load_or_create().unwrap_or_else(|e| {
         log::error!("Config error: {:#} — using defaults", e);
         config::Config::default()
     });
 
-    let providers = build_providers(&cfg);
+    let (providers, provider_errors) = build_providers_reporting(&cfg);
+    write_startup_log(&provider_errors);
 
     let state = AppState {
         config: Mutex::new(cfg.clone()),
