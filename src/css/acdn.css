@@ -28,7 +28,7 @@
   --shadow-md: 0 3px 12px oklch(0% 0 0 / 0.08), 0 1px 3px oklch(0% 0 0 / 0.04);
   --shadow-lg: 0 8px 32px oklch(0% 0 0 / 0.10), 0 2px 8px oklch(0% 0 0 / 0.05);
 
-  --glass-bg:     rgba(255, 255, 255, 0.72);
+  --glass-bg:     rgba(255, 255, 255, 0.88);
   --glass-border: rgba(255, 255, 255, 0.50);
 
   --radius-sm:   4px;
@@ -67,7 +67,7 @@
     --color-accent:     oklch(60%  0.16  220);
     --color-accent-dim: oklch(18%  0.06  220);
 
-    --glass-bg:     rgba(22, 22, 26, 0.72);
+    --glass-bg:     rgba(22, 22, 26, 0.88);
     --glass-border: rgba(255, 255, 255, 0.10);
 
     --shadow-sm: 0 1px 3px  oklch(0% 0 0 / 0.025);
