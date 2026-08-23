@@ -2,7 +2,7 @@ import { lookup, getConfig, onQuery, hideMainWindow } from './ipc.js';
 import { renderResult, renderLoading } from './render.js';
 
 // Tauri v2 renamed window.getCurrent() -> getCurrentWindow()
-const { getCurrentWindow, LogicalSize } = window.__TAURI__.window;
+const { getCurrentWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
 
 const searchInput = document.getElementById('search-input');
 const resultsView = document.getElementById('results-view');
@@ -13,8 +13,14 @@ const BASE_WIDTH = 560;
 const BAR_HEIGHT = 68;
 const MAX_HEIGHT = 560;
 
+// How far above true vertical-center the bar should sit when first shown.
+// Positive = higher up the screen.
+const VERTICAL_OFFSET = 120;
+
 let currentQuery  = '';
 let debounceTimer = null;
+let anchorLeft    = null; // fixed X so the window never drifts horizontally
+let anchorTop     = null; // fixed top edge so growth is downward-only
 
 async function init() {
   // Theme is automatic (prefers-color-scheme), not user-configurable — see
@@ -35,6 +41,12 @@ async function init() {
     clearBtn && (clearBtn.style.display = 'none');
     searchInput.focus();
     currentQuery = '';
+    // Rust just repositioned the window at its above-center anchor for
+    // this show — drop our cached anchor so the next resizeToFit() call
+    // re-reads the real position instead of reusing a stale one from a
+    // previous show (e.g. after the user manually moved/the OS clamped it).
+    anchorLeft = null;
+    anchorTop = null;
     showEmpty();
   });
 
@@ -112,17 +124,50 @@ function showResultsView() {
 
 // Spotlight-style: the window grows downward to fit results, up to a cap.
 // setSize() alone anchors growth at the window's current top-left corner,
-// which would drift it off-center as it gets taller — re-center after
-// every resize so it always grows symmetrically around the screen center.
+// so as long as that corner is fixed the window grows straight down with
+// no horizontal drift and no need to re-center (re-centering on every
+// keystroke caused visible jumping and a one-frame mismatch between the
+// resized window rect and the rounded #app content — the "square corner"
+// glitch). The anchor is computed once, the first time the window is
+// shown, then reused for every resize until the app restarts.
+async function establishAnchor() {
+  if (anchorLeft !== null) return;
+  const win = getCurrentWindow();
+  const [monitor, size, position] = await Promise.all([
+    win.currentMonitor(),
+    win.outerSize(),
+    win.outerPosition(),
+  ]);
+  if (monitor) {
+    const scale = await win.scaleFactor();
+    const screenWidth  = monitor.size.width  / scale;
+    const screenHeight = monitor.size.height / scale;
+    anchorLeft = Math.round((screenWidth - BASE_WIDTH) / 2);
+    anchorTop  = Math.round((screenHeight - BAR_HEIGHT) / 2) - VERTICAL_OFFSET;
+    anchorTop  = Math.max(anchorTop, 24); // never go off the top edge
+  } else {
+    // Fallback: keep whatever position the window already has.
+    const scale = await win.scaleFactor();
+    anchorLeft = Math.round(position.x / scale);
+    anchorTop  = Math.round(position.y / scale) - VERTICAL_OFFSET;
+  }
+  await win.setPosition(new LogicalPosition(anchorLeft, anchorTop));
+}
+
 function resizeToFit() {
-  requestAnimationFrame(() => {
+  requestAnimationFrame(async () => {
     const contentHeight = document.getElementById('app').scrollHeight;
     const height = Math.min(Math.max(contentHeight, BAR_HEIGHT), MAX_HEIGHT);
     const win = getCurrentWindow();
-    win
-      .setSize(new LogicalSize(BASE_WIDTH, height))
-      .then(() => win.center())
-      .catch(() => {});
+    try {
+      await establishAnchor();
+      await win.setSize(new LogicalSize(BASE_WIDTH, height));
+      // Re-assert position after resize: on Windows, growing a window's
+      // size can nudge its top-left if the OS clamps it to stay on-screen.
+      await win.setPosition(new LogicalPosition(anchorLeft, anchorTop));
+    } catch {
+      // best-effort; ignore
+    }
   });
 }
 
